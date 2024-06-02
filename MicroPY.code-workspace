@@ -1,0 +1,11 @@
+{
+    "folders": [
+      {
+        "path": "ESP32 Upy"
+      },
+      {
+        "name": "serial:/COM5",
+        "uri": "serial://com5/"
+      }
+    ]
+}
