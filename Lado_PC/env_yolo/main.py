@@ -9,9 +9,10 @@ cap.set(3, 640)               # Establecer el ancho del fotograma en 640 píxele
 cap.set(4, 480)               # Establecer la altura del fotograma en 480 píxeles
 
 # Cargar el modelo YOLO
-model = YOLO("yolo-Weights/yolov8n.pt")  # Cargar el modelo YOLOv8 con pesos pre-entrenados
+model = YOLO("yolo-Weights/best_yolo11m_v1.pt")  # Cargar el modelo YOLOv8 entrenado
 
 # Definir las clases de objetos para la detección
+"""
 classNames = ["persona", "bicicleta", "coche", "motocicleta", "avión", "autobús", "tren", "camión", "bote",
               "semáforo", "boca de incendios", "señal de stop", "parquímetro", "banco", "pájaro", "gato",
               "perro", "caballo", "oveja", "vaca", "elefante", "oso", "cebra", "jirafa", "mochila", "paraguas",
@@ -23,6 +24,8 @@ classNames = ["persona", "bicicleta", "coche", "motocicleta", "avión", "autobú
               "microondas", "horno", "tostadora", "fregadero", "refrigerador", "libro", "reloj", "florero", "tijeras",
               "oso de peluche", "secador de pelo", "cepillo de dientes"
               ]
+"""
+classNames = ["- Air_drumming_Harel_Almog_Saar_Inbar - v1 day3_augmentations"]
 
 # Bucle infinito para capturar continuamente fotogramas de la cámara
 while True:
@@ -30,7 +33,7 @@ while True:
     success, img = cap.read()
 
     # Realizar la detección de objetos utilizando el modelo YOLO en el fotograma capturado
-    results = model(img, stream=True)
+    results = model(img, conf=0.3, stream=True)
 
     # Iterar a través de los resultados de la detección de objetos
     for r in results:
