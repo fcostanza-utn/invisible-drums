@@ -7,5 +7,8 @@
         "name": "serial:/COM5",
         "uri": "serial://com5/"
       }
-    ]
+    ],
+    "settings": {
+      "git.ignoreLimitWarning": true
+    }
 }
