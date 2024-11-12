@@ -34,6 +34,7 @@ while cap.isOpened():
     # Obtener el mapa de profundidad
     depth_map = estimate_depth(frame)
 
+    #print (depth_map)
     # Redimensionar y mostrar el mapa de profundidad
     depth_map_resized = cv2.resize(depth_map, (frame.shape[1], frame.shape[0]))
     cv2.imshow("Depth Map", depth_map_resized)
