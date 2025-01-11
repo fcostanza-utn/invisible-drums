@@ -1,26 +1,21 @@
-# Importar librerías
+#librerías
 from ultralytics import YOLO
 import cv2
 import math
-import torch
 import numpy as np
-from transformers import DPTForDepthEstimation, DPTFeatureExtractor
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import mido
-
-# Configurar el dispositivo para CUDA si está disponible
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Cargar el modelo YOLO y MiDaS
+from imu_module import IMUVisualizer
+from midas import DepthEstimator
+"""
+INICIALIZACION DE YOLO
+"""
+# modelo YOLO
 model_yolo = YOLO("yolo-Weights/best_yolo11m_v2.pt")
-model_midas = DPTForDepthEstimation.from_pretrained("Intel/dpt-hybrid-midas").to(device)
-feature_extractor = DPTFeatureExtractor.from_pretrained("Intel/dpt-hybrid-midas")
-
-# Definir las clases de objetos para la detección
-classNames = ["drumsticks_mid", "drumsticks_tip"]
-
-
+classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
+# Midas
+depth_estimator = DepthEstimator()
 # Iniciar la cámara
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(3, 640)  # Ancho del fotograma
@@ -29,22 +24,27 @@ cap.set(4, 480)  # Alto del fotograma
 tip_points = []
 mid_points = []
 
-# Función para estimar profundidad usando MiDaS
-def estimate_depth(image):
-    inputs = feature_extractor(images=image, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = model_midas(**inputs)
-        predicted_depth = outputs.predicted_depth
+"""
+INICIALIZACION DE IMU
+"""
+visualizer = IMUVisualizer('192.168.0.186', 80)
 
-    # Convertir la profundidad a formato numpy y normalizar
-    depth = predicted_depth.squeeze().cpu().numpy()
-    depth_min, depth_max = depth.min(), depth.max()
-    normalized_depth = (depth - depth_min) / (depth_max - depth_min)
+"""
+INICIALIZACION DE MIDI
+"""
+# Función para enviar una nota MIDI
+def send_midi_note(note):
+    if note:
+        midi_out.send(mido.Message('note_on', note=note, velocity=100))
+        midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
 
-    # Redimensionar el mapa de profundidad para que coincida con el tamaño de la imagen de entrada
-    depth_resized = cv2.resize(normalized_depth, (image.shape[1], image.shape[0]))
+print("Available MIDI output ports:")
+print(mido.get_output_names())
 
-    return depth_resized
+portmidi = mido.Backend('mido.backends.rtmidi')
+midi_out = portmidi.open_output('MIDI1 1')
+
+
 
 def map_position_to_midi(x, y):
     if x < 100 and y < 100:   # Condicion
@@ -63,19 +63,6 @@ def map_position_to_midi(x, y):
         return 45  # Nota MIDI para un lowtom drum
     return None
 
-# Función para enviar una nota MIDI
-def send_midi_note(note):
-    if note:
-        midi_out.send(mido.Message('note_on', note=note, velocity=100))
-        midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-
-print("Available MIDI output ports:")
-print(mido.get_output_names())
-
-portmidi = mido.Backend('mido.backends.rtmidi')
-midi_out = portmidi.open_output('MIDI1 1')
-
-# Abrir archivo para guardar detecciones
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
 
@@ -85,10 +72,7 @@ while True:
     if not success:
         break
 
-    # Estimar el mapa de profundidad del fotograma completo
-    depth_map = estimate_depth(img)
-
-    # Realizar la detección de objetos usando YOLO
+    depth_map = depth_estimator.estimate_depth(img)
     results = model_yolo.predict(img, conf=0.6, stream=True)
     points = {}  # Diccionario para almacenar puntos centrales y profundidad por clase
 
@@ -139,7 +123,6 @@ while True:
     if cv2.waitKey(1) == ord('q'):
         break
 
-# Liberar la cámara y cerrar ventanas
 cap.release()
 cv2.destroyAllWindows()
 
