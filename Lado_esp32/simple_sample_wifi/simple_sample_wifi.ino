@@ -2,13 +2,15 @@
 #include <WiFi.h>  // Incluimos la librería para WiFi
 #include <MPU6050_light.h>
 #include <LSM303.h>
+#include <string.h>
 
 // Configuración de WiFi
 // const char* ssid = "TomNet";            // Reemplaza con el nombre de tu red WiFi
 // const char* password = "nonealone681";  // Reemplaza con la contraseña de tu red
-const char* ssid = "ANANOMUERDE 2.4GHz";
-const char* password = "Dulcinea01";
-
+// const char* ssid = "ANANOMUERDE 2.4GHz";
+// const char* password = "Dulcinea01";
+const char* ssid = "Personal-Fran-2.4G";
+const char* password = "Fran270894$";
 
 WiFiServer server(80);  // Puerto 80 para el servidor TCP
 
@@ -93,10 +95,13 @@ void loop() {
   if (client) {
     Serial.println("Cliente conectado.");
 
+    int ref_time = millis();
+
     // Mantener la conexión abierta
     while (client.connected()) {
-      if ((millis() - timer) > 10) {
-        inicio = millis();
+      if ((millis() - timer) > 15) {
+        // inicio = millis();
+
         mpu.update();
         compass.read();
         corrected_x = (compass.m.x - offset_x) * scale_x;
@@ -117,34 +122,40 @@ void loop() {
           report += ",";
           report += String(buffer[i]);
         }
-        unsigned long startTime = millis();  // Tiempo antes de enviar
+        int milliseconds = millis() - ref_time;
+        report += ",";
+        report += String(milliseconds);
+        
+        // unsigned long startTime = millis();  // Tiempo antes de enviar
 
         // Enviar los datos a través del cliente TCP
         client.print(report + "\n");                       // Asegúrate de agregar un salto de línea al final
-        unsigned long elapsedTime = millis() - startTime;  // Tiempo transcurrido
+        // Serial.print("Mensaje: ");
+        // Serial.println(report);
+        // unsigned long elapsedTime = millis() - startTime;  // Tiempo transcurrido
 
-        // Asegurarse de que el tiempo transcurrido no sea cero
-        if (elapsedTime > 0) {
-          size_t messageSize = report.length();                       // Tamaño del mensaje en bytes
-          float speed = (float)messageSize / (elapsedTime / 1000.0);  // Velocidad en bytes por segundo
+        // // Asegurarse de que el tiempo transcurrido no sea cero
+        // if (elapsedTime > 0) {
+        //   size_t messageSize = report.length();                       // Tamaño del mensaje en bytes
+        //   float speed = (float)messageSize / (elapsedTime / 1000.0);  // Velocidad en bytes por segundo
 
-          // Imprimir la velocidad en el monitor serie
-          Serial.print("Tamaño del mensaje: ");
-          Serial.print(messageSize);
-          Serial.print(" bytes. Tiempo de envío: ");
-          Serial.print(elapsedTime);
-          Serial.print(" ms. Velocidad: ");
-          Serial.print(speed);
-          Serial.println(" bytes/segundo.");
-        } else {
-          Serial.println("Error: El tiempo transcurrido es cero.");
-        }
+        //   // Imprimir la velocidad en el monitor serie
+        //   Serial.print("Tamaño del mensaje: ");
+        //   Serial.print(messageSize);
+        //   Serial.print(" bytes. Tiempo de envío: ");
+        //   Serial.print(elapsedTime);
+        //   Serial.print(" ms. Velocidad: ");
+        //   Serial.print(speed);
+        //   Serial.println(" bytes/segundo.");
+        // } else {
+        //   Serial.println("Error: El tiempo transcurrido es cero.");
+        // }
 
         sampleIndex = 0;
-        fin = millis();
-        Serial.print("Tardó en terminar el ciclo: ");
-        Serial.print(fin - inicio);
-        Serial.println(" milisegundos");
+        // fin = millis();
+        // Serial.print("Tardó en terminar el ciclo: ");
+        // Serial.print(fin - inicio);
+        // Serial.println(" milisegundos");
         timer = millis();
       }
     }
