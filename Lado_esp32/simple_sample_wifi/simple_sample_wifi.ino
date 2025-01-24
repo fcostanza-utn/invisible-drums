@@ -58,7 +58,7 @@ void setup() {
 
   // Inicialización de los sensores
   Wire.begin();
-  byte status = mpu.begin(0,3);
+  byte status = mpu.begin(0);
   Serial.print(F("MPU6050 status: "));
   Serial.println(status);
   while (status != 0) {}  // Detener si no se puede conectar

@@ -4,8 +4,11 @@ import numpy as np
 from transformers import DPTForDepthEstimation, DPTImageProcessor
 
 class DepthEstimator:
-    def __init__(self):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, device=None):
+        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(torch.cuda.is_available())
+        #print(torch.cuda.get_device_name(0))
+        print(f"Using device: {self.device}")
         self.model = DPTForDepthEstimation.from_pretrained("Intel/dpt-hybrid-midas").to(self.device)
         self.feature_extractor = DPTImageProcessor.from_pretrained("Intel/dpt-hybrid-midas")
 

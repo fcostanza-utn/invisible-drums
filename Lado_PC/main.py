@@ -124,7 +124,7 @@ with open("detections.txt", "w") as file:
 #Cunfiguro timer
 timer = pg.QtCore.QTimer()
 timer.timeout.connect(update)
-timer.start(int(10))
+timer.start(int(17))
 visualizer.view.show()
 #visualizer.run()
 

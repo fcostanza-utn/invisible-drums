@@ -223,23 +223,19 @@ class IMUVisualizer:
 
             # # Aplicar rotaciones
             buff = self.acc[1]
-            self.acc[1] = self.acc[0]
-            self.acc[0] = buff
-            self.acc[1] = -self.acc[1]
+            self.acc[1] = -self.acc[0]
+            self.acc[0] = -buff
             self.acc = [x * 9.8 for x in self.acc]
 
             buff = self.gyro[1]
-            self.gyro[1] = -self.gyro[0]
-            self.gyro[0] = -buff
-            self.gyro[0] = -self.gyro[0]
+            self.gyro[1] = self.gyro[0]
+            self.gyro[0] = buff
             self.gyro[2]= -self.gyro[2]
             self.gyro = np.radians(self.gyro)  # Convertir giroscopio a rad/s
-            
-            buff = self.mag[1]
-            self.mag[1] = self.mag[0]
-            self.mag[0] = buff
-            self.mag[1] = -self.mag[1]
-            self.mag[0] = -self.mag[0]
+
+            buff = self.mag[0]
+            self.mag[0] = -self.mag[1]
+            self.mag[1] = buff
 
             # Actualizar cuaternión con EKF
             self.Q = self.ekf.update(self.Q_buff, self.gyro, self.acc, self.mag, self.dt)

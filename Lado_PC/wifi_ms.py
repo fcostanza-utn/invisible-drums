@@ -328,7 +328,7 @@ vector_grav = gl.GLLinePlotItem(
     width=4,             # Grosor de la línea
     mode='lines'
 )
-view.addItem(vector_grav)
+#view.addItem(vector_grav)
 
 # Definir el vector
 start_acc = np.array([0, 0, 0])  # Origen del vector
@@ -342,7 +342,7 @@ vector_acc = gl.GLLinePlotItem(
     width=4,             # Grosor de la línea
     mode='lines'
 )
-view.addItem(vector_acc)
+#view.addItem(vector_acc)
 
 # Tamaño de la caja
 box_size = (2, 0.05, 0.05)
@@ -412,46 +412,51 @@ def update():
 ############################################################ Rotación para palillo
 
         # # Aplicar rotaciones
-        # # buff = acc[1]
-        # # acc[1] = acc[0]
-        # # acc[0] = buff
-        # acc[1] = -acc[1]
-        # acc = [x * 9.8 for x in acc]
-
-        # #buff = gyro[1]
-        # # gyro[1] = -gyro[0]
-        # # gyro[0] = -buff
-        # gyro[0] = -gyro[0]
-        # gyro[2]= -gyro[2]
-        # gyro = np.radians(gyro)  # Convertir giroscopio a rad/s
-        
-        # # buff = mag[1]
-        # # mag[1] = mag[0]
-        # # mag[0] = buff
-        # mag[1] = -mag[1]
-        # mag[0] = -mag[0]
-
-############################################################
-
-############################################################ Rotación para protoboard
-
-        # Aplicar rotaciones
-        buff = acc[0]
-        acc[0] = -acc[1]
-        acc[1] = -buff
-        #acc[0] = -acc[1]
+        buff = acc[1]
+        acc[1] = -acc[0]
+        acc[0] = -buff
         acc = [x * 9.8 for x in acc]
 
         buff = gyro[1]
         gyro[1] = gyro[0]
         gyro[0] = buff
-
         gyro[2]= -gyro[2]
         gyro = np.radians(gyro)  # Convertir giroscopio a rad/s
 
         buff = mag[0]
         mag[0] = -mag[1]
         mag[1] = buff
+
+        """
+        buff = mag[1]
+        mag[1] = mag[0]
+        mag[0] = buff
+        mag[1] = -mag[1]
+        mag[0] = -mag[0]
+        """
+        #print(mag)
+
+############################################################
+
+############################################################ Rotación para protoboard
+
+        # Aplicar rotaciones
+        #buff = acc[0]
+        #acc[0] = -acc[1]
+        #acc[1] = -buff
+        #acc[0] = -acc[1]
+        #acc = [x * 9.8 for x in acc]
+
+        #buff = gyro[1]
+        #gyro[1] = gyro[0]
+        #gyro[0] = buff
+
+        #gyro[2]= -gyro[2]
+        #gyro = np.radians(gyro)  # Convertir giroscopio a rad/s
+
+        #buff = mag[0]
+        #mag[0] = -mag[1]
+        #mag[1] = buff
         #print("GYro: ", gyro[1])
 ############################################################
 
