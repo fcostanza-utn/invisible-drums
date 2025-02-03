@@ -7,6 +7,8 @@ import sys
 from PyQt5 import QtWidgets
 from collections import deque
 from ahrs.filters import EKF
+import asyncio
+
 
 class IMUVisualizer:
     class MovingAverageFilter:
@@ -30,14 +32,14 @@ class IMUVisualizer:
                 self.state = self.alpha * measurement + (1 - self.alpha) * self.state
             return self.state
 
-    def __init__(self, esp32_ip, esp32_port, dt=0.005):
+    def __init__(self, esp32_ip, esp32_port, u_ia_ori = [0,0,0,0], u_ia_pos = [0,0,0,0], dt=0.005):
         self.CANT_SAMPLES = 1
         self.dt = dt
         self.esp32_ip = esp32_ip
         self.esp32_port = esp32_port
+        self.u_ia_ori = u_ia_ori
+        self.u_ia_pos = u_ia_pos
 
-        # Distancia al eje de giro
-        self.d = np.array([0.35, 0, 0])
         # Referencia de acelerómetro
         self.acc_ref = np.array([0, 0, 1])
         # Gravedad en el sistema global
@@ -45,39 +47,72 @@ class IMUVisualizer:
 
         # Matrices del sistema
         # Estado inicial: posición y velocidad [x, y, z, vx, vy, vz]
-        self.x = np.array([[0], [0], [0], [0], [0], [0], [0], [0], [0]])  # Estado inicial: posición, velocidad y aceleracion en 3D
+        self.x_pos = np.array([[0], [0], [0], [0], [0], [0], [0], [0], [0]])  # Estado inicial: posición, velocidad y aceleracion en 3D
+        self.x_acc = np.array([[0], [0], [1]])
+        self.x_fus_pos = np.array([[0], [0], [0]])
+        self.x_fus_ori = np.array([[0], [0], [0], [0]])
         self.x_estimado = np.zeros(9)
 
         # Matriz de transición de estado (F)
-        self.F = np.array([[1, 0, 0, self.dt, 0,    0,    0.5 * self.dt**2, 0,                         0],
-                    [0, 1, 0, 0,    self.dt, 0,    0,             0.5 * self.dt**2, 0            ],
-                    [0, 0, 1, 0,    0,    self.dt, 0,             0,             0.5 * self.dt**2],
-                    [0, 0, 0, 1,    0,    0,    self.dt,          0,             0            ],
-                    [0, 0, 0, 0,    1,    0,    0,             self.dt,          0            ],
-                    [0, 0, 0, 0,    0,    1,    0,             0,             self.dt         ],
-                    [0, 0, 0, 0,    0,    0,    1,             0,             0            ],
-                    [0, 0, 0, 0,    0,    0,    0,             1,             0            ],
-                    [0, 0, 0, 0,    0,    0,    0,             0,             1            ]])
+        self.F_pos = np.array([ [1, 0, 0, self.dt,  0,          0,          0.5 * self.dt**2,   0,                  0               ],
+                                [0, 1, 0, 0,        self.dt,    0,          0,                  0.5 * self.dt**2,   0               ],
+                                [0, 0, 1, 0,        0,          self.dt,    0,                  0,                  0.5 * self.dt**2],
+                                [0, 0, 0, 1,        0,          0,          self.dt,            0,                  0               ],
+                                [0, 0, 0, 0,        1,          0,          0,                  self.dt,            0               ],
+                                [0, 0, 0, 0,        0,          1,          0,                  0,                  self.dt         ],
+                                [0, 0, 0, 0,        0,          0,          1,                  0,                  0               ],
+                                [0, 0, 0, 0,        0,          0,          0,                  1,                  0               ],
+                                [0, 0, 0, 0,        0,          0,          0,                  0,                  1               ]])
+        self.F_acc = np.array([ [1,0,0],
+                                [0,1,0],
+                                [0,0,1]])
+        self.F_fus_pos = np.array([ [1,0,0],
+                                [0,1,0],
+                                [0,0,1]])
+        self.F_fus_ori = np.array([ [1,0,0,0],
+                                    [0,1,0,0],
+                                    [0,0,1,0],
+                                    [0,0,0,1]])
 
+        # # Matriz de control (B) para incluir aceleración medida
+        # self.B_pos = np.array([[0.5 * DT_2**2, 0,             0            ],
+        #               [0,             0.5 * DT_2**2, 0            ],
+        #               [0,             0,             0.5 * DT_2**2],
+        #               [DT_2,          0,             0            ],
+        #               [0,             DT_2,          0            ],
+        #               [0,             0,             DT_2         ]])
 
         # Matriz de covarianza inicial (P)
-        self.P = np.eye(9) * 10  # Incertidumbre inicial en posición y velocidad
+        self.P_pos = np.eye(9) * 1  # Incertidumbre inicial en posición y velocidad
+        self.P_acc = np.eye(3) * 1  # Incertidumbre inicial de la aceleración
+        self.P_fus_ori = np.eye(4) * 5 # Incertidumbre inicial de la posición
+        self.P_fus_pos = np.eye(3) * 10 # Incertidumbre inicial de la posición
 
         # Matriz de covarianza del proceso (Q): incertidumbre del modelo
-        self.Q_efk = np.eye(9) * 0.8  # Pequeñas incertidumbres en posición y velocidad
+        self.Q_pos = np.eye(9) * 0.8
+        self.Q_acc = np.eye(3) * 0.1
+        self.Q_fus_ori = np.eye(4) * 0.5
+        self.Q_fus_pos = np.eye(3) * 0.5
 
         # Matriz de covarianza de las mediciones (R): incertidumbre del sensor
-        self.R = np.eye(3) * 0.1  # Ruido del acelerómetro en las tres dimensiones
+        self.R_pos = np.eye(3) * 0.1
+        self.R_acc = np.eye(3) * 1
+        self.R_fus_ori_ia = np.eye(4) * 0.01
+        self.R_fus_ori_sensor = np.eye(4) * 0.1
+        self.R_fus_pos_ia = np.eye(3) * 0.01
+        self.R_fus_pos_sensor = np.eye(3) * 10
 
         # Matriz de medición (H):
-        self.H = np.array([[0, 0, 0, 0, 0, 0, 1, 0, 0],
-                    [0, 0, 0, 0, 0, 0, 0, 1, 0],
-                    [0, 0, 0, 0, 0, 0, 0, 0, 1]])
-
-        # Matriz de medición (H_T):
-        self.H_t = np.array([[2/self.dt**2, 0, 0, -2/self.dt, 0, 0],
-                    [0, 2/self.dt**2, 0, 0, -2/self.dt,0],
-                    [0, 0, 2/self.dt**2, 0, 0, -2/self.dt]])
+        self.H_pos = np.array([ [0, 0, 0, 0, 0, 0, 1, 0, 0],
+                                [0, 0, 0, 0, 0, 0, 0, 1, 0],
+                                [0, 0, 0, 0, 0, 0, 0, 0, 1]])
+        self.H_fus_ori = np.array([ [1, 0, 0, 0],
+                                    [0, 1, 0, 0],
+                                    [0, 0, 1, 0],
+                                    [0, 0, 0, 1]])
+        self.H_fus_pos = np.array([ [1, 0, 0],
+                                    [0, 1, 0],
+                                    [0, 0, 1]])
 
         # Conexión con ESP32
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -96,7 +131,7 @@ class IMUVisualizer:
         self.filtro_mm = self.MovingAverageFilter(window_size=5)
 
         # Configuración del filtro EKF
-        self.ekf = EKF(frequency=(1/dt), magnetic_ref=-40.0, noises=[0.4**2, 0.05**2, 0.2**2], P=(np.identity(4)*100), q0=self.Q_buff)
+        self.ekf = EKF(frequency=(1/self.dt), magnetic_ref=-40.0, noises=[0.4**2, 0.05**2, 0.2**2], P=(np.identity(4)*100), q0=self.Q_buff)
 
         self.start_gravedad = np.array([0, 0, 0])
         self.end_gravedad = np.array([0, 0, 1])
@@ -147,27 +182,24 @@ class IMUVisualizer:
         self.view.addItem(axes)
 
         # vector de gravedad
-        
         self.vector_grav = gl.GLLinePlotItem(pos=np.array([self.start_gravedad, self.end_gravedad]),
                                              color=(1, 1, 1, 1),
                                              width=4, mode='lines')
-        #self.view.addItem(self.vector_grav)
+        self.view.addItem(self.vector_grav)
 
         # vector de aceleración
-        
-        
         self.vector_acc = gl.GLLinePlotItem(
             pos=self.vector_acc,
             color=(1, 0.5, 0, 1),  # Color naranja
             width=4,             # Grosor de la línea
             mode='lines'
         )
-        #self.view.addItem(vector_acc)
+        self.view.addItem(self.vector_acc)
 
         # Tamaño de la caja
         box_size = (2, 0.05, 0.05)
         vertices  = create_box(size=box_size)
-        # # Transformar al sistema NED (invertir el eje Z, intercambiar X e Y)
+        # Transformar al sistema NED (invertir el eje Z, intercambiar X e Y)
         self.vertices_ned = vertices.copy()
         self.vertices_ned[:, 2] = -vertices[:, 2]
         self.vertices_ned[:, 1] = -vertices[:, 1]
@@ -212,7 +244,9 @@ class IMUVisualizer:
             data += packet
         return data.decode()
 
-    def update(self):
+    def update(self, u_ia_ori = [0,0,0,0], u_ia_pos = [0,0,0,0]):
+        self.u_ia_ori = u_ia_ori
+        self.u_ia_pos = u_ia_pos
         raw_data = self.receive_data()
         if not raw_data:
             return
@@ -236,11 +270,12 @@ class IMUVisualizer:
             buff = self.mag[0]
             self.mag[0] = -self.mag[1]
             self.mag[1] = buff
-
+################################################################## Kalman de Orientación
             # Actualizar cuaternión con EKF
             self.Q = self.ekf.update(self.Q_buff, self.gyro, self.acc, self.mag, self.dt)
             self.Q_buff = self.Q
 
+################################################################## Actualización de gráfico
             # Actualizar visualización del vector de gravedad
             rotated_end_gravedad = self.rotate_vector_by_quaternion(self.end_gravedad, self.Q)
             rotated_vector_gravedad = np.array([self.start_gravedad, rotated_end_gravedad])
@@ -260,97 +295,133 @@ class IMUVisualizer:
             self.meshdata.setVertexes(vertices_rotados_buff)
             self.box.meshDataChanged()
 
-            #filtrado
-            self.acc = self.filtro_pb.filter(self.acc)
+            # #filtrado
+            # self.acc = self.filtro_pb.filter(self.acc)
 
-            self.acc_global = self.remove_gravity(self.acc, self.Q)
+################################################################## Kalman de Orientación Fusión
 
+            u_sensor_ori = self.Q
             # 1. Predicción
-            u = self.acc_global.reshape(3, 1)                # Entrada de control (aceleración medida)
-            x_t = np.dot(self.F, self.x)                          # Predicción del estado
-            P_t = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q_efk     # Predicción de la covarianza
+            x_t = np.dot(self.F_fus_ori, self.x_fus_ori)                                            # Predicción del estado
+            P_t = np.dot(np.dot(self.F_fus_ori, self.P_fus_ori), self.F_fus_ori.T) + self.Q_fus_ori     # Predicción de la covarianza
 
             # 2. Actualización
-            z = u - np.dot(self.H, x_t)
+            # Innovación (residuo): diferencia entre medición y predicción
+            z = self.u_ia_ori - np.dot(self.H_fus_ori, x_t)
 
             # Ganancia de Kalman
-            S = np.dot(np.dot(self.H, P_t), self.H.T) + self.R
-            K = np.dot(np.dot(P_t, self.H.T), np.linalg.inv(S))
+            S = np.dot(np.dot(self.H_fus_ori, P_t), self.H_fus_ori.T) + self.R_fus_ori_ia
+            K = np.dot(np.dot(P_t, self.H_fus_ori.T), np.linalg.inv(S))
 
             # Corrección del estado
-            self.x = x_t + np.dot(K, z)
+            self.x_fus_ori = x_t + np.dot(K, z)
 
             # Actualización de la covarianza
-            self.P = P_t - np.dot(np.dot(K, self.H), P_t)
+            self.P_fus_ori = P_t - np.dot(np.dot(K, self.H_fus_ori), P_t)
+
+            # 2. Actualización
+            # Innovación (residuo): diferencia entre medición y predicción
+            z = u_sensor_ori - np.dot(self.H_fus_ori, self.x_fus_ori)
+
+            # Ganancia de Kalman
+            S = np.dot(np.dot(self.H_fus_ori, self.P_fus_ori), self.H_fus_ori.T) + self.R_fus_ori_sensor
+            K = np.dot(np.dot(self.P_fus_ori, self.H_fus_ori.T), np.linalg.inv(S))
+
+            # Corrección del estado
+            self.x_fus_ori = self.x_fus_ori + np.dot(K, z)
+
+            # Actualización de la covarianza
+            self.P_fus_ori = self.P_fus_ori - np.dot(np.dot(K, self.H_fus_ori), self.P_fus_ori)
+
+################################################################## Kalman de Posición Sensor
+
+            #filtrado
+            # acc = filtro_pb.filter(acc)
+            # acc = filtro_mm.filter(acc)
+
+            # 1. Predicción
+            acc = np.array(self.acc)
+            u = self.remove_gravity(acc, self.Q)
+            u = u.reshape(3, 1)
+
+            # 1. Predicción
+            x_t = np.dot(self.F_pos, self.x_pos)                                         # Predicción del estado
+            P_t = np.dot(np.dot(self.F_pos, self.P_pos), self.F_pos.T) + self.Q_pos      # Predicción de la covarianza
+
+            # 2. Actualización
+            # Innovación (residuo): diferencia entre medición y predicción
+            z = u - np.dot(self.H_pos, x_t)
+
+            # Ganancia de Kalman
+            S = np.dot(np.dot(self.H_pos, P_t), self.H_pos.T) + self.R_pos
+            K = np.dot(np.dot(P_t, self.H_pos.T), np.linalg.inv(S))
+
+            # Corrección del estado
+            self.x_pos = x_t + np.dot(K, z)
+
+            # Actualización de la covarianza
+            self.P_pos = P_t - np.dot(np.dot(K, self.H_pos), P_t)
 
             # Simplificar el estado estimado
-            self.x_estimado = self.x.flatten()
+            x_estimado = self.x_pos.flatten()
+            # Convertir las estimaciones en arrays para graficar
+            x_estimado = np.array(x_estimado)
+
+################################################################## Kalman de Posición Fusión
+
+            u_sensor_pos = np.array([[x_estimado[0]],[x_estimado[1]],[x_estimado[2]]])
+            # 1. Predicción
+            x_t = np.dot(self.F_fus_pos, self.x_fus_pos)                                            # Predicción del estado
+            P_t = np.dot(np.dot(self.F_fus_pos, self.P_fus_pos), self.F_fus_pos.T) + self.Q_fus_pos     # Predicción de la covarianza
+
+            # 2. Actualización
+            # Innovación (residuo): diferencia entre medición y predicción
+            z = self.u_ia_pos - np.dot(self.H_fus_pos, x_t)
+
+            # Ganancia de Kalman
+            S = np.dot(np.dot(self.H_fus_pos, P_t), self.H_fus_pos.T) + self.R_fus_pos_ia
+            K = np.dot(np.dot(P_t, self.H_fus_pos.T), np.linalg.inv(S))
+
+            # Corrección del estado
+            self.x_fus_pos = x_t + np.dot(K, z)
+
+            # Actualización de la covarianza
+            self.P_fus_pos = P_t - np.dot(np.dot(K, self.H_fus_pos), P_t)
+
+            # 2. Actualización
+            # Innovación (residuo): diferencia entre medición y predicción
+            z = u_sensor_pos - np.dot(self.H_fus_pos, self.x_fus_pos)
+
+            # Ganancia de Kalman
+            S = np.dot(np.dot(self.H_fus_pos, self.P_fus_pos), self.H_fus_pos.T) + self.R_fus_pos_sensor
+            K = np.dot(np.dot(self.P_fus_pos, self.H_fus_pos.T), np.linalg.inv(S))
+
+            # Corrección del estado
+            self.x_fus_pos = self.x_fus_pos + np.dot(K, z)
+
+            # Actualización de la covarianza
+            self.P_fus_pos = self.P_fus_pos - np.dot(np.dot(K, self.H_fus_pos), self.P_fus_pos)
+
+            # Simplificar el estado estimado
+            self.x_estimado = self.x_fus_pos.flatten()
 
             # Convertir las estimaciones en arrays para graficar
             self.x_estimado = np.array(self.x_estimado)
 
             # Imprimir resultados
             self.update_point(self.x_estimado[0], self.x_estimado[1], self.x_estimado[2])
+            return True
 
-    def quaternion_conjugate(self,q):
-        """
-        Calcula el conjugado de un cuaternión.
-        """
-        w, x, y, z = q
-        return [w, -x, -y, -z]
+    def rotate_vector_by_quaternion(self, vector, q):
 
-    def quaternion_multiply(self, q1, q2):
-        """
-        Multiplica dos cuaterniones.
-        q1 y q2 son listas de longitud 4: [w, x, y, z].
-        """
-        w1, x1, y1, z1 = q1
-        w2, x2, y2, z2 = q2
-
-        w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-        x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-        y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-        z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-
-        return [w, x, y, z]
-
-    def quaternion_inverse(self, q):
-        """
-        Calcula el cuaternión inverso para un cuaternión dado en formato [w, x, y, z].
+        R_matrix = np.array([
+            [q[0]**2+q[1]**2-q[2]**2-q[3]**2,   2.0*(q[1]*q[2]-q[0]*q[3]),          2.0*(q[1]*q[3]+q[0]*q[2])],
+            [2.0*(q[1]*q[2]+q[0]*q[3]),         q[0]**2-q[1]**2+q[2]**2-q[3]**2,    2.0*(q[2]*q[3]-q[0]*q[1])],
+            [2.0*(q[1]*q[3]-q[0]*q[2]),         2.0*(q[0]*q[1]+q[2]*q[3]),          q[0]**2-q[1]**2-q[2]**2+q[3]**2]])
         
-        Args:
-            q: np.array con el cuaternión [w, x, y, z].
-
-        Returns:
-            np.array con el cuaternión inverso [w, -x, -y, -z] / |q|^2.
-        """
-        w, x, y, z = q
-        # Calcular la norma del cuaternión
-        norm = w**2 + x**2 + y**2 + z**2
-        
-        # Cuaternión conjugado
-        q_conjugate = np.array([w, -x, -y, -z])
-        
-        # Cuaternión inverso (conjugado / norma^2)
-        q_inverse = q_conjugate / norm
-        
-        return q_inverse
-
-    def rotate_vector_by_quaternion(self, vector, quaternion):
-        vector_quat = [0, 0, 0, 0]
-        vector_quat[3] = vector[2]
-        vector_quat[2] = vector[1]
-        vector_quat[1] = vector[0]
-
-        # Calcular el conjugado del cuaternión
-        quat_conjugate = self.quaternion_conjugate(quaternion)
-
-        # Rotar el vector: q * v * q^-1
-        temp_result = self.quaternion_multiply(quaternion, vector_quat)
-        rotated_quat = self.quaternion_multiply(temp_result, quat_conjugate)
-
-        # Extraer la parte vectorial del cuaternión resultante
-        rotated_vector = rotated_quat[1:]  # Ignorar la parte escalar
+        buff = R_matrix @ vector
+        rotated_vector = buff
+        #rotated_vector = buff[1:]  # Ignorar la parte escalar
         return rotated_vector
 
     def rotate_points(self,points, quaternion):
@@ -364,13 +435,29 @@ class IMUVisualizer:
         # Aplicar la rotación
         return np.dot(points, R.T)
 
-    def remove_gravity(self, acc, Q):
+    # Función para corregir el efecto de la gravedad
+    def remove_gravity(self, acc, q):
         if (np.linalg.norm(acc) < 9.9) and (np.linalg.norm(acc) > 9.7):
             return np.array([0.0, 0.0, 0.0])
-        Q = self.quaternion_inverse(Q)
-        gravity_corr = np.array(self.rotate_vector_by_quaternion(self.gravity_global, Q))
+
+        R_matrix = np.array([
+            [q[0]**2+q[1]**2-q[2]**2-q[3]**2, 2.0*(q[1]*q[2]-q[0]*q[3]), 2.0*(q[1]*q[3]+q[0]*q[2])],
+            [2.0*(q[1]*q[2]+q[0]*q[3]), q[0]**2-q[1]**2+q[2]**2-q[3]**2, 2.0*(q[2]*q[3]-q[0]*q[1])],
+            [2.0*(q[1]*q[3]-q[0]*q[2]), 2.0*(q[0]*q[1]+q[2]*q[3]), q[0]**2-q[1]**2-q[2]**2+q[3]**2]])
+        
+        gravity_corr = R_matrix @ self.gravity_global
         acc_corr = acc - gravity_corr
         return acc_corr
+
+    def H_matrix(self, q, x):
+        R_matrix = np.array([
+            [q[0]**2+q[1]**2-q[2]**2-q[3]**2, 2.0*(q[1]*q[2]-q[0]*q[3]), 2.0*(q[1]*q[3]+q[0]*q[2])],
+            [2.0*(q[1]*q[2]+q[0]*q[3]), q[0]**2-q[1]**2+q[2]**2-q[3]**2, 2.0*(q[2]*q[3]-q[0]*q[1])],
+            [2.0*(q[1]*q[3]-q[0]*q[2]), 2.0*(q[0]*q[1]+q[2]*q[3]), q[0]**2-q[1]**2-q[2]**2+q[3]**2]])
+        
+        acc_rot = R_matrix @ x
+        acc_rot = np.array(acc_rot)
+        return acc_rot
 
     def update_point(self, x, y, z):
         data = np.array([[x, y, z]])
@@ -379,7 +466,7 @@ class IMUVisualizer:
     def run(self):
         self.timer = pg.QtCore.QTimer()
         self.timer.timeout.connect(self.update)
-        self.timer.start(int(self.dt * 1000))
+        self.timer.start(int(self.dt * 500))
 
         self.view.show()
         sys.exit(self.app.exec_())
@@ -388,6 +475,9 @@ class IMUVisualizer:
 if __name__ == "__main__":
     esp32_ip = '192.168.1.71'  # Dirección IP del ESP32
     esp32_port = 80             # Puerto del ESP32
+    dt = 0.02
+    u_ia_ori = np.array([0, 0, 0, 0])
+    u_ia_pos = np.array([0, 0, 0])
 
-    visualizer = IMUVisualizer(esp32_ip, esp32_port)
+    visualizer = IMUVisualizer(esp32_ip, esp32_port, u_ia_ori, u_ia_pos, dt=dt)
     visualizer.run()

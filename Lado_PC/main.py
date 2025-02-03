@@ -10,6 +10,7 @@ from imu_module import IMUVisualizer
 from midas import DepthEstimator
 import pyqtgraph as pg
 import sys
+import time
 """
 INICIALIZACION DE YOLO
 """
@@ -29,7 +30,7 @@ mid_points = []
 """
 INICIALIZACION DE IMU
 """
-visualizer = IMUVisualizer('192.168.1.71', 80)
+visualizer = IMUVisualizer('192.168.1.71', 80, 0.02)
 
 """
 INICIALIZACION DE MIDI
@@ -67,12 +68,17 @@ def map_position_to_midi(x, y):
 BUCLE PRINCIPAL
 """
 def update():
-    visualizer.update()
+    start_time = time.time()
+    imu_return = visualizer.update()
+    end_time = time.time()
+    
     success, img = cap.read()
     if not success:
         return
 
+    #start_time = time.time()
     depth_map = depth_estimator.estimate_depth(img)
+    #end_time = time.time()
     results = model_yolo.predict(img, conf=0.6, stream=True)
     points = {}  # Diccionario para almacenar puntos centrales y profundidad por clase
 
@@ -101,8 +107,8 @@ def update():
                 mid_points.append((Xp, Yp, z_value))
 
             # Guardar en archivo txt
-            with open("detections.txt", "a") as file:
-                file.write(f"{class_name}, {Xp}, {Yp}, {z_value:.4f}\n")
+            #with open("detections.txt", "a") as file:
+                #file.write(f"{class_name}, {Xp}, {Yp}, {z_value:.4f}\n")
 
             # Guardar puntos para dibujar línea
             points[class_name] = (Xp, Yp)
@@ -116,7 +122,9 @@ def update():
 
     # Mostrar el fotograma
     cv2.imshow("Cam", img)
-    
+    wait_time = end_time - start_time
+    print(f"Tiempo de espera entre update's: {wait_time:.4f} segundos")
+    print("imu_return: ", imu_return)
 
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
@@ -126,7 +134,6 @@ timer = pg.QtCore.QTimer()
 timer.timeout.connect(update)
 timer.start(int(17))
 visualizer.view.show()
-#visualizer.run()
 
 while True:
     if cv2.waitKey(1) == ord('q'):
