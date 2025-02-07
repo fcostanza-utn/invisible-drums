@@ -244,10 +244,11 @@ class IMUVisualizer:
             data += packet
         return data.decode()
 
-    def update(self, u_ia_ori = [0,0,0,0], u_ia_pos = [0,0,0,0]):
+    def update(self, u_ia_ori = [0,0,0,0], u_ia_pos = [0,0,0,0], raw_data=None):
         self.u_ia_ori = u_ia_ori
         self.u_ia_pos = u_ia_pos
-        raw_data = self.receive_data()
+        if __name__ == "__main__":
+            raw_data = self.receive_data()
         if not raw_data:
             return
 
@@ -410,7 +411,7 @@ class IMUVisualizer:
 
             # Imprimir resultados
             self.update_point(self.x_estimado[0], self.x_estimado[1], self.x_estimado[2])
-            return True
+            return x_estimado
 
     def rotate_vector_by_quaternion(self, vector, q):
 

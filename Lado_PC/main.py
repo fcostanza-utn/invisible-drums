@@ -2,20 +2,31 @@
 from ultralytics import YOLO
 import cv2
 import math
-import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import mido
 from imu_module import IMUVisualizer
 from midas import DepthEstimator
 import pyqtgraph as pg
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 import sys
 import time
+import torch
+
 """
-INICIALIZACION DE YOLO
+Variables de datos y control
+"""
+imu_data = None
+img = None
+imu_data_read = False
+img_read = False
+
+"""
+INICIALIZACION DE YOLO y Midas
 """
 # modelo YOLO
-model_yolo = YOLO("yolo-Weights/best_yolo11m_v2.pt")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model_yolo = YOLO("yolo-Weights/best_yolo11m_v2.pt").to(device)
 classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
 # Midas
 depth_estimator = DepthEstimator()
@@ -48,102 +59,101 @@ portmidi = mido.Backend('mido.backends.rtmidi')
 midi_out = portmidi.open_output('MIDI1 1')
 
 def map_position_to_midi(x, y):
-    if x < 100 and y < 100:   # Condicion
+    if x < 100 and y < 100:
         return 36  # Nota MIDI para un kick drum
-    elif x < 200 and y < 200: # Condicion 
+    elif x < 200 and y < 200:
         return 38  # Nota MIDI para un snare drum
-    elif x < 200 and y < 200: # Condicion 
+    elif x < 200 and y < 200: 
         return 42  # Nota MIDI para un hihat drum
-    elif x < 200 and y < 200: # Condicion 
+    elif x < 200 and y < 200:
         return 49  # Nota MIDI para un crash drum
-    elif x < 200 and y < 200: # Condicion 
+    elif x < 200 and y < 200:
         return 51  # Nota MIDI para un ride drum
-    elif x < 200 and y < 200: # Condicion 
+    elif x < 200 and y < 200:
         return 50  # Nota MIDI para un hightom drum
-    elif x < 200 and y < 200: # Condicion 
+    elif x < 200 and y < 200:
         return 45  # Nota MIDI para un lowtom drum
     return None
 
 """
-BUCLE PRINCIPAL
+Clase Hilo para capturar datos
 """
-def update():
-    start_time = time.time()
-    imu_return = visualizer.update()
-    end_time = time.time()
-    
-    success, img = cap.read()
-    if not success:
-        return
+class SensorCaptureThread(QThread):
+    dataReady = pyqtSignal(object, object)  # Señal para enviar datos al hilo principal
 
-    #start_time = time.time()
+    def __init__(self):
+        super().__init__()
+        self.running = True
+
+    def run(self):
+        while self.running:
+            imu_data = visualizer.receive_data()  # Leer IMU
+            success, img = cap.read()  # Capturar frame de cámara
+            if success and imu_data:
+                self.dataReady.emit(imu_data, img)  # Emitir datos al hilo principal
+
+            time.sleep(0.06)  # Esperar 50ms para el siguiente frame
+
+    def stop(self):
+        self.running = False
+        self.wait()
+"""
+Funcion process_data: procesa los datos de la IMU y la cámara
+"""
+def process_data(imu_data, img):
+    #print("IMU data: ", imu_data)
+    start_time = time.time()
     depth_map = depth_estimator.estimate_depth(img)
-    #end_time = time.time()
     results = model_yolo.predict(img, conf=0.6, stream=True)
-    points = {}  # Diccionario para almacenar puntos centrales y profundidad por clase
+    points = {}
 
     for r in results:
-        boxes = r.boxes
-
-        for box in boxes:
-            # Coordenadas de la caja delimitadora
+        for box in r.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
-            Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2  # Coordenada central de la caja
+            Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2
             z_value = depth_map[Yp, Xp]
 
-            # confianza y clase
             confidence = math.ceil((box.conf[0] * 100)) / 100
             cls = int(box.cls[0])
             class_name = classNames[cls]
 
-            # Dibujar la caja y el texto en el fotograma
             cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
-            cv2.putText(img, f"{class_name} {confidence} Coord:({Xp},{Yp},{z_value:.2f})", (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(img, f"{class_name} {confidence} Coord:({Xp},{Yp},{z_value:.2f})",
+                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-            if class_name == "drumsticks_tip":
-                tip_points.append((Xp, Yp, z_value))
-            elif class_name == "drumsticks_mid":
-                mid_points.append((Xp, Yp, z_value))
-
-            # Guardar en archivo txt
-            #with open("detections.txt", "a") as file:
-                #file.write(f"{class_name}, {Xp}, {Yp}, {z_value:.4f}\n")
-
-            # Guardar puntos para dibujar línea
             points[class_name] = (Xp, Yp)
 
-    # Dibujar línea entre "drumsticks_mid" y "drumsticks_tip" si ambos están detectados
+    # Dibujar línea entre drumsticks_mid y drumsticks_tip
     if "drumsticks_mid" in points and "drumsticks_tip" in points:
         cv2.line(img, points["drumsticks_mid"], points["drumsticks_tip"], (0, 255, 0), 2)
-        (X,Y) = points["drumsticks_tip"]
-        midi_note = map_position_to_midi(X,Y)
+        (X, Y) = points["drumsticks_tip"]
+        fix_position=visualizer.update(raw_data=imu_data)
+        print("fix_position: ", fix_position)
+        
+        midi_note = map_position_to_midi(X, Y)
         send_midi_note(midi_note)
 
-    # Mostrar el fotograma
     cv2.imshow("Cam", img)
-    wait_time = end_time - start_time
-    print(f"Tiempo de espera entre update's: {wait_time:.4f} segundos")
-    print("imu_return: ", imu_return)
+    if cv2.waitKey(1) == ord('q'):
+        sensor_thread.stop()
+        cap.release()
+        cv2.destroyAllWindows()
+        sys.exit()
+    end_time = time.time()
+    print(f"Tiempo de procesamiento: {end_time - start_time:.3f} segundos")
 
+    
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
 
-#Cunfiguro timer
-timer = pg.QtCore.QTimer()
-timer.timeout.connect(update)
-timer.start(int(17))
-visualizer.view.show()
 
-while True:
-    if cv2.waitKey(1) == ord('q'):
-        break
+sensor_thread = SensorCaptureThread()
+sensor_thread.dataReady.connect(process_data)
+sensor_thread.start()
+
+#visualizer.view.show()
+visualizer.app.exec_()
 """
-Liberacion de recursos
-"""
-sys.exit(visualizer.app.exec_())
-cap.release()
-cv2.destroyAllWindows()
 # Graficar el movimiento en 3D
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -162,3 +172,4 @@ ax.set_ylabel('Y')
 ax.set_zlabel('Depth (Z)')
 ax.legend()
 plt.show()
+"""
