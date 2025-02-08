@@ -12,15 +12,12 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 import sys
 import time
 import torch
-
+import numpy as np
 """
 Variables de datos y control
 """
-imu_data = None
-img = None
-imu_data_read = False
-img_read = False
-
+init_meseaurement = False
+processing_flag = True
 """
 INICIALIZACION DE YOLO y Midas
 """
@@ -30,6 +27,7 @@ model_yolo = YOLO("yolo-Weights/best_yolo11m_v2.pt").to(device)
 classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
 # Midas
 depth_estimator = DepthEstimator()
+Cal_Poly = np.poly1d([-8.94471124, 11.59243574, -1.75101498])
 # Iniciar la cámara
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(3, 640)  # Ancho del fotograma
@@ -86,13 +84,18 @@ class SensorCaptureThread(QThread):
         self.running = True
 
     def run(self):
+        global processing_flag
+        button = True
         while self.running:
             imu_data = visualizer.receive_data()  # Leer IMU
+            if button:
+                _, _, _, _, button = visualizer.parse_sensor_data(imu_data, 0)
             success, img = cap.read()  # Capturar frame de cámara
-            if success and imu_data:
+            if success and imu_data and processing_flag and button==False:
+                processing_flag = False
                 self.dataReady.emit(imu_data, img)  # Emitir datos al hilo principal
 
-            time.sleep(0.06)  # Esperar 50ms para el siguiente frame
+            time.sleep(0.015)  # Esperar 60ms para el siguiente frame
 
     def stop(self):
         self.running = False
@@ -101,9 +104,11 @@ class SensorCaptureThread(QThread):
 Funcion process_data: procesa los datos de la IMU y la cámara
 """
 def process_data(imu_data, img):
+    global processing_flag
     #print("IMU data: ", imu_data)
     start_time = time.time()
     depth_map = depth_estimator.estimate_depth(img)
+    #depth_map = depth_estimator.ConvertToAbsoluteDepth(depth_estimator.estimate_depth(img),Cal_Poly)
     results = model_yolo.predict(img, conf=0.6, stream=True)
     points = {}
 
@@ -134,11 +139,13 @@ def process_data(imu_data, img):
         send_midi_note(midi_note)
 
     cv2.imshow("Cam", img)
+
     if cv2.waitKey(1) == ord('q'):
         sensor_thread.stop()
         cap.release()
         cv2.destroyAllWindows()
         sys.exit()
+    processing_flag = True
     end_time = time.time()
     print(f"Tiempo de procesamiento: {end_time - start_time:.3f} segundos")
 
@@ -146,13 +153,13 @@ def process_data(imu_data, img):
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
 
-
 sensor_thread = SensorCaptureThread()
 sensor_thread.dataReady.connect(process_data)
 sensor_thread.start()
 
 #visualizer.view.show()
 visualizer.app.exec_()
+
 """
 # Graficar el movimiento en 3D
 fig = plt.figure()

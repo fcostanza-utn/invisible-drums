@@ -4,6 +4,8 @@
 #include <LSM303.h>
 #include <string.h>
 
+#define PIN_GPIO 23  // Definir el pin que queremos leer
+
 // Configuración de WiFi
 // const char* ssid = "TomNet";            // Reemplaza con el nombre de tu red WiFi
 // const char* password = "nonealone681";  // Reemplaza con la contraseña de tu red
@@ -16,6 +18,7 @@ WiFiServer server(80);  // Puerto 80 para el servidor TCP
 
 MPU6050 mpu(Wire);
 LSM303 compass;
+
 
 const int baud_rate = 115200;
 unsigned long timer = 0;
@@ -36,6 +39,7 @@ float scale_x, scale_y, scale_z;
 
 void setup() {
   Serial.begin(baud_rate);
+  pinMode(PIN_GPIO, INPUT);   // Configurar el pin como entrada
 
   // Conectarse a la red WiFi
   Serial.print("Conectando a ");
@@ -125,6 +129,9 @@ void loop() {
         int milliseconds = millis() - ref_time;
         report += ",";
         report += String(milliseconds);
+        int estado = digitalRead(PIN_GPIO);  // Leer el estado del pin
+        report += ",";
+        report += String(estado);
         
         // unsigned long startTime = millis();  // Tiempo antes de enviar
 

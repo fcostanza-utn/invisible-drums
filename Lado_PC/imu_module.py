@@ -226,14 +226,15 @@ class IMUVisualizer:
     def parse_sensor_data(self, data_string, ref):
         clean_string = data_string.strip()
         data_split = clean_string.split(',')
+        print(data_split)
         try:
             data = [float(value) for value in data_split]
-            if len(data) == (9 * self.CANT_SAMPLES + 1):
-                return data[ref:ref+3], data[ref+3:ref+6], data[ref+6:ref+9], data[ref+9]  # Acelerómetro, Giroscopio, Magnetómetro, Tiempo en ms
+            if len(data) == (9 * self.CANT_SAMPLES + 2):
+                return data[ref:ref+3], data[ref+3:ref+6], data[ref+6:ref+9], data[ref+9], data[ref+10]  # Acelerómetro, Giroscopio, Magnetómetro, Tiempo en ms
             else:
                 return None
         except:
-            return None
+            return None 
 
     def receive_data(self):
         data = b''
@@ -254,7 +255,7 @@ class IMUVisualizer:
 
         sensor_data = self.parse_sensor_data(raw_data, 0)
         if sensor_data is not None:
-            self.acc, self.gyro, self.mag, milisegundos = sensor_data
+            self.acc, self.gyro, self.mag, milisegundos, button = sensor_data
 
             # # Aplicar rotaciones
             buff = self.acc[1]

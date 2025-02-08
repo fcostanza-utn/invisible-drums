@@ -5,10 +5,11 @@ from transformers import DPTForDepthEstimation, DPTImageProcessor
 
 class DepthEstimator:
     def __init__(self, device=None):
+        self.midas = "Intel/dpt-hybrid-midas"
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
-        self.model = DPTForDepthEstimation.from_pretrained("Intel/dpt-hybrid-midas").to(self.device)
-        self.feature_extractor = DPTImageProcessor.from_pretrained("Intel/dpt-hybrid-midas")
+        self.model = DPTForDepthEstimation.from_pretrained(self.midas).to(self.device)
+        self.feature_extractor = DPTImageProcessor.from_pretrained(self.midas)
 
     # Función para estimar profundidad usando MiDaS
     def estimate_depth(self,image):
@@ -26,3 +27,8 @@ class DepthEstimator:
         depth_resized = cv2.resize(normalized_depth, (image.shape[1], image.shape[0]))
 
         return depth_resized
+    
+    def ConvertToAbsoluteDepth(self, depth_map, calibration_poly):
+        # Aplicar la función de calibración para obtener la profundidad absoluta
+        absolute_depth_map = np.polyval(calibration_poly, depth_map)
+        return absolute_depth_map
