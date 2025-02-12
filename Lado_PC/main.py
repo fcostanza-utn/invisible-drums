@@ -13,6 +13,7 @@ import sys
 import time
 import torch
 import numpy as np
+from Coordinate3DCalculator import Coordinate3DCalculator
 """
 Variables de datos y control
 """
@@ -35,6 +36,9 @@ cap.set(4, 480)  # Alto del fotograma
 
 tip_points = []
 mid_points = []
+
+blue_tip_detection = None
+red_tape_detection = None
 
 """
 INICIALIZACION DE IMU
@@ -105,11 +109,18 @@ Funcion process_data: procesa los datos de la IMU y la cámara
 """
 def process_data(imu_data, img):
     global processing_flag
+    image_height = 480
     #print("IMU data: ", imu_data)
     start_time = time.time()
     depth_map = depth_estimator.estimate_depth(img)
     #depth_map = depth_estimator.ConvertToAbsoluteDepth(depth_estimator.estimate_depth(img),Cal_Poly)
     results = model_yolo.predict(img, conf=0.6, stream=True)
+    calculator = Coordinate3DCalculator(
+        focal_length_mm=7.9,        # Distancia focal de tu cámara
+        sensor_width_mm=9.40741,      # Ancho del sensor de tu cámara
+        image_width_pixels=640,   # Resolución horizontal de tu cámara
+        known_distance_cm=20       # Distancia medida entre punta y cinta
+    )
     points = {}
 
     for r in results:
@@ -134,11 +145,36 @@ def process_data(imu_data, img):
         (X, Y) = points["drumsticks_tip"]
         fix_position=visualizer.update(raw_data=imu_data)
         print("fix_position: ", fix_position)
+        blue_tip_detection = points["drumsticks_tip"]    
+        red_tape_detection = points["drumsticks_mid"]    
         
+        # Calcular coordenadas 3D
+        x, y, z = calculator.calculate_coordinates(
+            blue_tip_detection, 
+            red_tape_detection,
+            image_height
+        )
+        
+        # Obtener métricas de confianza
+        confidence = calculator.get_confidence_metrics(
+            blue_tip_detection,
+            red_tape_detection
+        )
+        
+        print(f"Coordenadas de la punta:")
+        print(f"X: {x:.2f} cm")
+        print(f"Y: {y:.2f} cm")
+        print(f"Z: {z:.2f} cm")
+        print(f"\nMétricas de confianza:")
+        print(f"Distancia en píxeles: {confidence['pixel_distance']:.2f}")
+        print(f"Incertidumbre relativa: {confidence['relative_depth_uncertainty']:.2f}")
+
         midi_note = map_position_to_midi(X, Y)
         send_midi_note(midi_note)
 
     cv2.imshow("Cam", img)
+
+    
 
     if cv2.waitKey(1) == ord('q'):
         sensor_thread.stop()
