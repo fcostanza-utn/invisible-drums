@@ -24,7 +24,7 @@ INICIALIZACION DE YOLO y Midas
 """
 # modelo YOLO
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model_yolo = YOLO("yolo-Weights/best_yolo11m_v2.pt").to(device)
+model_yolo = YOLO("yolo-Weights/best_yolo11m_v3.pt").to(device)
 classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
 # Midas
 depth_estimator = DepthEstimator()
@@ -114,7 +114,7 @@ def process_data(imu_data, img):
     start_time = time.time()
     depth_map = depth_estimator.estimate_depth(img)
     #depth_map = depth_estimator.ConvertToAbsoluteDepth(depth_estimator.estimate_depth(img),Cal_Poly)
-    results = model_yolo.predict(img, conf=0.6, stream=True)
+    results = model_yolo.predict(img, conf=0.35, stream=True)
     calculator = Coordinate3DCalculator(
         focal_length_mm=7.9,        # Distancia focal de tu cámara
         sensor_width_mm=9.40741,      # Ancho del sensor de tu cámara
