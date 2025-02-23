@@ -73,15 +73,15 @@ class IMUVisualizer:
                                 [0,                 0,                  self.dt         ]])
 
         # Matriz de covarianza inicial (P)
-        self.P_pos = np.eye(6) * 1  # Incertidumbre inicial en posición y velocidad
+        self.P_pos = np.eye(6) * 0.05  # Incertidumbre inicial en posición y velocidad
         self.P_fus_ori = np.eye(4) * 5 # Incertidumbre inicial de la posición
 
         # Matriz de covarianza del proceso (Q): incertidumbre del modelo
-        self.Q_pos = np.eye(6) * 0.8
+        self.Q_pos = np.eye(6) * 5
         self.Q_fus_ori = np.eye(4) * 0.5
 
         # Matriz de covarianza de las mediciones (R): incertidumbre del sensor
-        self.R_pos = np.eye(3) * 0.1
+        self.R_pos = np.eye(3) *50
         self.R_fus_ori_ia = np.eye(4) * 0.01
         self.R_fus_ori_sensor = np.eye(4) * 0.1
 
@@ -298,6 +298,8 @@ class IMUVisualizer:
         self.P_fus_ori = self.P_fus_ori - np.dot(np.dot(K, self.H_fus_ori), self.P_fus_ori)
 
         self.Q_buff = self.x_fus_ori
+        self.Q_buff = self.Q_buff[:,0]
+        self.Q_buff = self.Q_buff / np.linalg.norm(self.Q_buff)
 
     def posicion_fus_kf(self):
         #filtrado
@@ -331,6 +333,9 @@ class IMUVisualizer:
         # x_estimado = self.x_pos.flatten()
         # # Convertir las estimaciones en arrays para graficar
         # x_estimado = np.array(x_estimado)
+    
+        self.x_pos =  self.x_pos[:,0]
+        self.x_pos = self.x_pos.reshape(6,1)
 
         return self.x_pos
 
@@ -402,7 +407,7 @@ class IMUVisualizer:
         self.Q = self.ekf.update(self.Q_buff, self.gyro, self.acc, self.mag, self.dt)
         self.Q_buff = self.Q
 ################################################################## Kalman de Orientación Fusión
-        # self.ori_fus_kf()
+        self.ori_fus_kf()
 ################################################################## Kalman de Posición Sensor y Fusión
         self.x_estimado = self.posicion_fus_kf()                                            
 

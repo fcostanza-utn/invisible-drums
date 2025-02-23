@@ -1,9 +1,12 @@
 #librerías
 from ultralytics import YOLO
+import logging
 import cv2
 from openni import openni2
 import math
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from collections import deque
 from mpl_toolkits.mplot3d import Axes3D
 import mido
 from imu_module import IMUVisualizer
@@ -34,11 +37,34 @@ mid_points = []
 blue_tip_detection = None
 red_tape_detection = None
 
+mtx_rgb = np.array([[549.512901,    0.,             303.203858],
+                    [0.,            550.614039,     232.135452],
+                    [0.,            0.,             1.]])
+
+mtx_ir = np.array([ [622.443923,    0.,             301.653252],
+                    [0.,            623.759527,     232.812601],
+                    [0.,            0.,             1.]])
+
+tras_vector = np.array([[2.368586e-02], [2.909582e-04], [4.632117e-04]])
+
+Rot_matrix = np.array([[9.9997269257755e-01, 6.7448757651869e-03, -3.0200579643581e-03],[-6.7584186667168e-03, 9.9996705075785e-01, -4.4967961679709e-03],[2.9896281242425e-03, 4.5170841881792e-03, 9.9998532892944e-01]])
+
+contador_grafico = 0
+
+# Configuración graficos
+num_muestras = 100  # Número de muestras visibles en el eje X
+x_data = deque(maxlen=num_muestras)
+y_data = deque(maxlen=num_muestras)
+z_data = deque(maxlen=num_muestras)
+t_data = deque(maxlen=num_muestras)  # Contador de muestras (eje X)
+t_data = deque(maxlen=num_muestras)  # Contador de muestras (eje X)
+
 """
 Colas de Datos
 """
 sensor_queue = Queue(maxsize=100)   # Para datos crudos de la IMU
 camara_queue = Queue(maxsize=100)   # Para datos crudos de la cámara
+graf_queue = Queue(maxsize=100)   # Para datos crudos para graficar
 
 """
 INICIALIZACION DE YOLO y Midas
@@ -48,6 +74,8 @@ INICIALIZACION DE YOLO y Midas
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_yolo = YOLO("yolo-Weights/best_yolo11m_vKinect.pt").to(device)
 classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
+
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
 
 # Iniciar la cámara
 openni2.initialize("C:/Program Files/OpenNI2/Redist")
@@ -84,6 +112,34 @@ print("Available MIDI output ports:")
 print(mido.get_output_names())
 portmidi = mido.Backend('mido.backends.rtmidi')
 midi_out = portmidi.open_output('MIDI1 1')
+
+"""
+INICIALIZACION Graficos
+"""
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
+
+ax1.set_title("X vs muestras")
+ax2.set_title("Y vs muestras")
+ax3.set_title("Z vs muestras")
+
+ax1.set_ylim(-0.5, 0.5)
+ax2.set_ylim(-0.5, 0.5)
+ax3.set_ylim(-0.5, 0.5)
+
+line1, = ax1.plot([], [], 'r-', label="X")
+line2, = ax2.plot([], [], 'g-', label="Y")
+line3, = ax3.plot([], [], 'b-', label="Z")
+
+ax1.legend()
+ax2.legend()
+ax3.legend()
+
+def init():
+    # Configuramos un límite inicial en X
+    ax1.set_xlim(0, num_muestras)
+    ax2.set_xlim(0, num_muestras)
+    ax3.set_xlim(0, num_muestras)
+    return line1, line2, line3
 
 """
 FUNCIONES
@@ -131,7 +187,7 @@ def sensor_capture_thread():
                 sensor_queue.put((imu_data))
                 end_time = time.time()
                 # print(f"Tiempo de procesamiento captura: {end_time - start_time:.5f} segundos")
-            time.sleep(0.01)  # 10ms entre muestras
+            time.sleep(0.015)  # 10ms entre muestras
 
     
 ##########################
@@ -151,7 +207,7 @@ def image_processing_thread():
             elapsed_time = time.time()
             image_height = color_data.shape[0]
             #depth_map = depth_estimator.ConvertToAbsoluteDepth(depth_estimator.estimate_depth(img),Cal_Poly)
-            results = model_yolo.predict(color_data, conf=0.35, stream=True)
+            results = model_yolo.predict(color_data, conf=0.25, stream=True)
             points = {}
 
             for r in results:
@@ -159,6 +215,13 @@ def image_processing_thread():
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2
                     z_value = int(depth_data[Yp, Xp])
+
+                    XY_stereo = np.dot(Rot_matrix, np.array([[Xp], [Yp], [z_value]])) + tras_vector
+                    if int(XY_stereo[1,0]) > 480:
+                        XY_stereo[1,0] = 480
+                    if int(XY_stereo[0,0]) > 640:
+                        XY_stereo[0,0] = 640
+                    z_value = int(depth_data[int(XY_stereo[1,0]), int(XY_stereo[0,0])])
 
                     confidence = math.ceil((box.conf[0] * 100)) / 100
                     cls = int(box.cls[0])
@@ -187,7 +250,7 @@ def image_processing_thread():
         if cv2.waitKey(1) == ord('q'):
             stop_event.set()  # Señalizamos al hilo 1 que debe detenerse
             break
-        time.sleep(0.001)  # 5ms entre muestras
+        time.sleep(0.005)  # 5ms entre muestras
     
     openni2.unload()
     cv2.destroyAllWindows()
@@ -200,6 +263,8 @@ def kalman_update_thread():
     flag_cam_empty = False
     camera_time = 0
     imu_time = 0
+    u_ia_pos = np.zeros((3, 1))
+    u_ia_ori = np.zeros((4, 1))
 
     while not stop_event.is_set():
         start_time = time.time()
@@ -257,34 +322,46 @@ def kalman_update_thread():
             camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
             print("camera_time: ", camera_time)
 
-        if (camera_time > imu_time - 20) and (camera_time < imu_time + 20) and not flag_imu_empty and not flag_cam_empty:
+        if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty:
             state = data_sync.get_state()
-            print("X_blue: ", X_blue)
-            u_ia_pos = np.array([X_blue - state['x_offset'], Y_blue - state['y_offset'], Z_blue - state['z_offset']])
-            u_ia_pos = u_ia_pos.reshape(3, 1)
-            u_ia_ori = np.array([qw,qx,qy,qz])
-            u_ia_ori = u_ia_ori.reshape(4, 1)
+            if not flag_cam_empty:
+                if X_blue and Y_blue and not Z_blue:
+                    Z_blue = u_ia_pos[2] * 1000 + state['z_offset']
+                else:
+                    u_ia_pos[2] = (Z_blue - state['z_offset']) / 1000
+                u_ia_pos[0] = (((X_blue - mtx_rgb[0,2]) * Z_blue - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
+                u_ia_pos[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
+                u_ia_pos = u_ia_pos.reshape(3, 1)
 
-            u_ia_pos[2] = u_ia_pos[2] / 1000
-            u_ia_pos[0] = (u_ia_pos[0] - 330) * u_ia_pos[2] / 600
-            u_ia_pos[1] = (u_ia_pos[1] - 240) * u_ia_pos[2] / 600
-            print("Z_blue: ", Z_blue)
-            print("z_offset: ", state['z_offset'])
-            print("u_ia_pos: ", u_ia_pos)
-            visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-            print("fix_position (c/cam): ", visualizer.x_estimado)
+                u_ia_ori = np.array([qw,qx,qy,qz])
+                u_ia_ori = u_ia_ori.reshape(4, 1)
+
+                print("u_ia_pos: ", u_ia_pos)
+                visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
+            else:    
+                visualizer.update_kf(gyro = gyro, mag = mag, acc = acc)
+
+            graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
+
+            print("X (c/cam): ", visualizer.x_estimado[0])
+            print("Y (c/cam): ", visualizer.x_estimado[1])
+            print("Z (c/cam): ", visualizer.x_estimado[2])
         elif not flag_imu_empty:
             visualizer.update_kf(gyro = gyro, mag = mag, acc = acc)
-            print("fix_position (s/cam): ", visualizer.x_estimado)
 
-        end_time = time.time()
+            graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
+            
+            print("X (s/cam): ", visualizer.x_estimado[0])
+            print("Y (s/cam): ", visualizer.x_estimado[1])
+            print("Z (s/cam): ", visualizer.x_estimado[2])
+
+        # end_time = time.time()
         # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
         
         # midi_note = map_position_to_midi(X_blue, Y_blue)
         # send_midi_note(midi_note)
             
-        time.sleep(0.005)  # 5ms entre muestras
-
+        time.sleep(0.018)  # 18ms entre muestras
 
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
@@ -299,6 +376,38 @@ t3 = threading.Thread(target=kalman_update_thread, daemon=True)
 t1.start()
 t2.start()
 t3.start()
+
+def update_graf(frame):
+    global contador_grafico
+    X, Y, Z = graf_queue.get()
+    if contador_grafico > 25:
+        t_data.append(t_data[-1] + 1 if t_data else 0)  # Aumenta el contador
+        x_data.append(X)  # Aquí pondrías los valores reales
+        y_data.append(Y)
+        z_data.append(Z)
+
+        # Solo actualizamos los datos, no recreamos el gráfico
+        line1.set_xdata(range(len(x_data)))
+        line1.set_ydata(x_data)
+        
+        line2.set_xdata(range(len(y_data)))
+        line2.set_ydata(y_data)
+        
+        line3.set_xdata(range(len(z_data)))
+        line3.set_ydata(z_data)
+
+        contador_grafico = 0
+        
+        return line1, line2, line3
+    else:
+        contador_grafico += 1
+        return line1, line2, line3
+
+# FuncAnimation se encarga de llamar a update() cada 100 ms
+ani = FuncAnimation(fig, update_graf, init_func=init, interval=20, blit=True, cache_frame_data=False)
+
+plt.tight_layout()
+plt.show()
 
 # Mantenemos el hilo principal vivo (por ejemplo, con un bucle infinito o esperando a que terminen los hilos)
 try:
