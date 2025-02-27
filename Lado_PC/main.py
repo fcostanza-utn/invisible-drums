@@ -34,6 +34,8 @@ mid_points = []
 blue_tip_detection = None
 red_tape_detection = None
 
+ref_time_midi = 0
+
 mtx_rgb = np.array([[549.512901,    0.,             303.203858],
                     [0.,            550.614039,     232.135452],
                     [0.,            0.,             1.]])
@@ -118,7 +120,7 @@ color_stream.start()
 """
 INICIALIZACION DE IMU
 """
-visualizer = IMUVisualizer('192.168.1.71', 80, 0.02)
+visualizer = IMUVisualizer('192.168.1.70', 80, 0.02)
 """
 INICIALIZACION DE MIDI
 """
@@ -155,46 +157,54 @@ FUNCIONES
 """
 # Función para enviar una nota MIDI
 def send_midi_note(note, acc):
+    timeoff = 0.05
     if note:
-        # if 0 < (np.linalg.norm(acc) - 9.8) < 10:
-        #     midi_out.send(mido.Message('note_on', note=note, velocity=15))
-        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-        # elif 10 < (np.linalg.norm(acc) - 9.8) < 20:
-        #     midi_out.send(mido.Message('note_on', note=note, velocity=30))
-        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-        # elif 20 < (np.linalg.norm(acc) - 9.8) < 30:
-        #     midi_out.send(mido.Message('note_on', note=note, velocity=45))
-        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-        # elif 30 < (np.linalg.norm(acc) - 9.8) < 40:
-        #     midi_out.send(mido.Message('note_on', note=note, velocity=60))
-        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-        # elif 40 < (np.linalg.norm(acc) - 9.8) < 50:
-        #     midi_out.send(mido.Message('note_on', note=note, velocity=75))
-        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-        # elif 50 < (np.linalg.norm(acc) - 9.8) < 60:
-        #     midi_out.send(mido.Message('note_on', note=note, velocity=90))
-        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
-        # elif 60 < (np.linalg.norm(acc) - 9.8) < 70:
-        midi_out.send(mido.Message('note_on', note=note, velocity=100))
-        midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        if 0.2 < (np.linalg.norm(acc) - 1) <= 0.5:
+            midi_out.send(mido.Message('note_on', note=note, velocity=15))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+        elif 0.5 < (np.linalg.norm(acc) - 1) <= 1:
+            midi_out.send(mido.Message('note_on', note=note, velocity=30))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+        elif 1 < (np.linalg.norm(acc) - 1) <= 1.5:
+            midi_out.send(mido.Message('note_on', note=note, velocity=45))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+        elif 1.5 < (np.linalg.norm(acc) - 1) <= 2:
+            midi_out.send(mido.Message('note_on', note=note, velocity=60))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+        elif 2 < (np.linalg.norm(acc) - 1) <= 2.5:
+            midi_out.send(mido.Message('note_on', note=note, velocity=75))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+        elif 2.5 < (np.linalg.norm(acc) - 1) <= 3:
+            midi_out.send(mido.Message('note_on', note=note, velocity=90))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+        elif 3 < (np.linalg.norm(acc) - 1):
+            midi_out.send(mido.Message('note_on', note=note, velocity=100))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
 
-def map_position_to_midi(x, y, z):
+def map_position_to_midi(x, y, z, time):
+    global ref_time_midi
     x = x * 100
     y = y * 100
     z = z * 100
-    # print(f"Posicion midi: {float(x):.1f} {float(y):.1f} {float(z):.1f}")
-    if (-25 < x < 5) and (45 < y < 50) and (-30 < z < 0):
-        return 38  # Nota MIDI para un snare drum
-    elif (-50 < x < -20) and (15 < y < 20) and (-25 < z < 5):
-        return 42  # Nota MIDI para un hihat drum
-    elif (-50 < x < -20) and (0 < y < 5) and (-60 < z < -30):
-        return 49  # Nota MIDI para un crash drum
-    elif (20 < x < 50) and (15 < y < 20) and (-55 < z < -15):
-        return 51  # Nota MIDI para un ride drum
-    elif (-30 < x < 0) and (20 < y < 25) and (-65 < z < -35):
-        return 50  # Nota MIDI para un hightom drum
-    elif (15 < x < 45) and (50 < y < 55) and (-35 < z < -5):
-        return 45  # Nota MIDI para un lowtom drum
+    if time - ref_time_midi > 0.15:
+        if (-25 < x < 5) and (45 < y < 47) and (-30 < z < 0):
+            ref_time_midi = time
+            return 38  # Nota MIDI para un snare drum
+        elif (-50 < x < -20) and (15 < y < 17) and (-25 < z < 5):
+            ref_time_midi = time
+            return 42  # Nota MIDI para un hihat drum
+        elif (-50 < x < -20) and (0 < y < 3) and (-60 < z < -30):
+            ref_time_midi = time
+            return 49  # Nota MIDI para un crash drum
+        elif (20 < x < 50) and (15 < y < 17) and (-55 < z < -15):
+            ref_time_midi = time
+            return 51  # Nota MIDI para un ride drum
+        elif (-30 < x < 0) and (20 < y < 23) and (-65 < z < -35):
+            ref_time_midi = time
+            return 50  # Nota MIDI para un hightom drum
+        elif (15 < x < 45) and (50 < y < 52) and (-35 < z < -5):
+            ref_time_midi = time
+            return 45  # Nota MIDI para un lowtom drum
     return None
 
 def corregir_mapa_profundidad(depth_frame, T, fx, fy, cx, cy):
@@ -290,7 +300,7 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
             z_value_min = int(np.min(z_value))
             return z_value_min
         else:
-            disparidad = 200
+            disparidad = 125
             Xp_min = max(Xp - disparidad, 0)
             Xp_max = min(Xp + disparidad, depth_frame.shape[1])  # Asegurar que no exceda las columnas
             # Extraer valores dentro de los límites
@@ -376,16 +386,26 @@ def image_processing_thread():
 
             # Dibujar línea entre drumsticks_mid y drumsticks_tip
             if "drumsticks_mid" in points and "drumsticks_tip" in points:
-                cv2.line(color_data, points["drumsticks_mid"][:2], points["drumsticks_tip"][:2], (0, 255, 0), 2)
+                if np.linalg.norm(np.array(points["drumsticks_mid"][:2]) - np.array(points["drumsticks_tip"][:2])) < 250:
+                    cv2.line(color_data, points["drumsticks_mid"][:2], points["drumsticks_tip"][:2], (0, 255, 0), 2)
+                    (X_blue, Y_blue, Z_blue) = points["drumsticks_tip"]
+                    (X_red, Y_red, Z_red) = points["drumsticks_mid"]
+                    if data_sync.get_state()['button']:
+                        data_sync.set_offsets(X_blue, Y_blue, Z_blue)
+                    if data_sync.get_state()['button_repeat']:
+                        data_sync.set_offsets(X_blue, Y_blue, Z_blue)
+                        data_sync.set_button_repeat(False)  
+                    if not data_sync.get_state()['button']:
+                        camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time))
+            elif "drumsticks_tip" in points:
                 (X_blue, Y_blue, Z_blue) = points["drumsticks_tip"]
-                (X_red, Y_red, Z_red) = points["drumsticks_mid"]
                 if data_sync.get_state()['button']:
                     data_sync.set_offsets(X_blue, Y_blue, Z_blue)
                 if data_sync.get_state()['button_repeat']:
                     data_sync.set_offsets(X_blue, Y_blue, Z_blue)
                     data_sync.set_button_repeat(False)  
                 if not data_sync.get_state()['button']:
-                    camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time))
+                    camara_queue.put((X_blue, Y_blue, Z_blue, 1000, 1000, 1000, elapsed_time))
 
             cv2.imshow("Cam", color_data)
             cv2.imshow("Depth", depth_corregido)
@@ -412,6 +432,13 @@ def kalman_update_thread():
     u_ia_ori = np.zeros((4, 1))
     acc = np.zeros((3, 1))
     note = None
+    only_blue = False
+    time_only_blue = 0
+    qw = 0
+    qx = 0
+    qy = 0
+    qz = 0
+    kalman_time = 0
 
     while not stop_event.is_set():
         start_time = time.time()
@@ -428,8 +455,21 @@ def kalman_update_thread():
             flag_cam_empty = True
             # print("La cola camara_queue está vacía.")
 
-    ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
         if not flag_cam_empty:
+            if X_red == 1000 and Y_red == 1000 and Z_red == 1000:
+                if time_only_blue == 0:
+                    only_blue = True
+                    time_only_blue = elapsed_time
+                elif (elapsed_time - time_only_blue) < 100:
+                    only_blue = True
+                else:
+                    only_blue = False
+            else:
+                only_blue = False
+                time_only_blue = elapsed_time
+
+    ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
+        if not flag_cam_empty and not only_blue:
             vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_red - Z_blue])
             vector_ori = vector_ori/np.linalg.norm(vector_ori)
 
@@ -464,7 +504,7 @@ def kalman_update_thread():
             imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
             # print("imu_time: ", imu_time)
         
-        if not flag_cam_empty:   
+        if not flag_cam_empty:
             camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
             # print("camera_time: ", camera_time)
 
@@ -486,8 +526,8 @@ def kalman_update_thread():
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
                 print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
             else:    
-                visualizer.update_kf(gyro = gyro, mag = mag, acc = acc)
-                # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
+                print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
 
             # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
 
@@ -496,12 +536,13 @@ def kalman_update_thread():
 
             # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
 
-            # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+            print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
 
         # end_time = time.time()
         # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
-        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]))
-        # print("midi note: ", midi_note)
+        kalman_time = time.time()
+        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), kalman_time)
+        #print("acc: ", (np.linalg.norm(acc) - 1))
         send_midi_note(midi_note, acc)
         time.sleep(0.018)  # 18ms entre muestras
 
