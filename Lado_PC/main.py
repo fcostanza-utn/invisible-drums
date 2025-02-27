@@ -4,19 +4,16 @@ import logging
 import cv2
 from openni import openni2
 import math
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 from collections import deque
-from mpl_toolkits.mplot3d import Axes3D
 import mido
 from imu_module import IMUVisualizer
+from PyQt5 import QtWidgets
 import pyqtgraph as pg
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer
+import pyqtgraph.opengl as gl
 import sys
 import time
 import torch
 import numpy as np
-from Coordinate3DCalculator import Coordinate3DCalculator
 from data_sync import DataSynchronizer
 from queue import Queue, Empty
 import threading
@@ -45,9 +42,28 @@ mtx_ir = np.array([ [622.443923,    0.,             301.653252],
                     [0.,            623.759527,     232.812601],
                     [0.,            0.,             1.]])
 
-tras_vector = np.array([[2.368586e-02], [2.909582e-04], [4.632117e-04]])
+mtx_prof = np.array([   [0,    0,     0],
+                        [0,    0,     0],
+                        [0,    0,     0]])
 
-Rot_matrix = np.array([[9.9997269257755e-01, 6.7448757651869e-03, -3.0200579643581e-03],[-6.7584186667168e-03, 9.9996705075785e-01, -4.4967961679709e-03],[2.9896281242425e-03, 4.5170841881792e-03, 9.9998532892944e-01]])
+tras_vector_prof = np.array([[0.05950176],
+                             [0.02782342],
+                             [0.89904015]])
+
+Rot_matrix_prof = np.array([[0.46891086,     -0.88155789,    -0.05457372],
+                            [0.87468821,     0.45490053,     0.16729026],
+                            [-0.12265043,    -0.12617921,    0.9843961]])
+
+T_prof = np.block([ [Rot_matrix_prof,   tras_vector_prof],
+                    [np.zeros((1, 3)),  np.ones((1, 1)) ]])
+
+tras_vector_stereo = np.array([[2.368586e-02],
+                               [2.909582e-04],
+                               [4.632117e-04]])
+
+Rot_matrix_stereo = np.array([[9.9997269257755e-01,     6.7448757651869e-03,    -3.0200579643581e-03],
+                              [-6.7584186667168e-03,    9.9996705075785e-01,    -4.4967961679709e-03],
+                              [2.9896281242425e-03,     4.5170841881792e-03,    9.9998532892944e-01]])
 
 contador_grafico = 0
 
@@ -96,8 +112,6 @@ depth_stream = device_ni.create_depth_stream()
 color_stream = device_ni.create_color_stream()
 color_stream.set_video_mode(modeRGB)
 depth_stream.set_video_mode(modeIR)
-#depth_stream.set_mirroring_enabled(False)
-#color_stream.set_mirroring_enabled(False)
 depth_stream.start()
 color_stream.start()
 
@@ -113,60 +127,181 @@ print(mido.get_output_names())
 portmidi = mido.Backend('mido.backends.rtmidi')
 midi_out = portmidi.open_output('MIDI1 1')
 
-"""
-INICIALIZACION Graficos
-"""
-fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
+'''
+Graficos QT
+'''
+# # Crear una aplicación de PyQt
+# app = QtWidgets.QApplication(sys.argv)
+# window = gl.GLViewWidget()
+# window.show()
+# window.setWindowTitle('Gráfico 3D en Tiempo Real')
+# window.setCameraPosition(distance=0.5)
+# # Crear los ejes
+# axis = gl.GLAxisItem()
+# axis.setSize(10, 10, 10)
+# window.addItem(axis)
+# # Crear el punto en 3D
+# point = gl.GLScatterPlotItem()
+# window.addItem(point)
 
-ax1.set_title("X vs muestras")
-ax2.set_title("Y vs muestras")
-ax3.set_title("Z vs muestras")
-
-ax1.set_ylim(-0.5, 0.5)
-ax2.set_ylim(-0.5, 0.5)
-ax3.set_ylim(-0.5, 0.5)
-
-line1, = ax1.plot([], [], 'r-', label="X")
-line2, = ax2.plot([], [], 'g-', label="Y")
-line3, = ax3.plot([], [], 'b-', label="Z")
-
-ax1.legend()
-ax2.legend()
-ax3.legend()
-
-def init():
-    # Configuramos un límite inicial en X
-    ax1.set_xlim(0, num_muestras)
-    ax2.set_xlim(0, num_muestras)
-    ax3.set_xlim(0, num_muestras)
-    return line1, line2, line3
+# # Configuración inicial del punto
+# def update_point(x, y, z):
+#     data = np.array([[x, y, z]])
+#     data = np.squeeze(data)
+#     point.setData(pos=data, size=10, color=(1, 0, 0, 1))
 
 """
 FUNCIONES
 """
 # Función para enviar una nota MIDI
-def send_midi_note(note):
+def send_midi_note(note, acc):
     if note:
+        # if 0 < (np.linalg.norm(acc) - 9.8) < 10:
+        #     midi_out.send(mido.Message('note_on', note=note, velocity=15))
+        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        # elif 10 < (np.linalg.norm(acc) - 9.8) < 20:
+        #     midi_out.send(mido.Message('note_on', note=note, velocity=30))
+        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        # elif 20 < (np.linalg.norm(acc) - 9.8) < 30:
+        #     midi_out.send(mido.Message('note_on', note=note, velocity=45))
+        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        # elif 30 < (np.linalg.norm(acc) - 9.8) < 40:
+        #     midi_out.send(mido.Message('note_on', note=note, velocity=60))
+        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        # elif 40 < (np.linalg.norm(acc) - 9.8) < 50:
+        #     midi_out.send(mido.Message('note_on', note=note, velocity=75))
+        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        # elif 50 < (np.linalg.norm(acc) - 9.8) < 60:
+        #     midi_out.send(mido.Message('note_on', note=note, velocity=90))
+        #     midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
+        # elif 60 < (np.linalg.norm(acc) - 9.8) < 70:
         midi_out.send(mido.Message('note_on', note=note, velocity=100))
         midi_out.send(mido.Message('note_off', note=note, velocity=100, time=0.1))  # La apaga después de un tiempo breve
 
-def map_position_to_midi(x, y):
-    if x < 100 and y < 100:
-        return 36  # Nota MIDI para un kick drum
-    elif x < 200 and y < 200:
+def map_position_to_midi(x, y, z):
+    x = x * 100
+    y = y * 100
+    z = z * 100
+    # print(f"Posicion midi: {float(x):.1f} {float(y):.1f} {float(z):.1f}")
+    if (-25 < x < 5) and (45 < y < 50) and (-30 < z < 0):
         return 38  # Nota MIDI para un snare drum
-    elif x < 200 and y < 200: 
+    elif (-50 < x < -20) and (15 < y < 20) and (-25 < z < 5):
         return 42  # Nota MIDI para un hihat drum
-    elif x < 200 and y < 200:
+    elif (-50 < x < -20) and (0 < y < 5) and (-60 < z < -30):
         return 49  # Nota MIDI para un crash drum
-    elif x < 200 and y < 200:
+    elif (20 < x < 50) and (15 < y < 20) and (-55 < z < -15):
         return 51  # Nota MIDI para un ride drum
-    elif x < 200 and y < 200:
+    elif (-30 < x < 0) and (20 < y < 25) and (-65 < z < -35):
         return 50  # Nota MIDI para un hightom drum
-    elif x < 200 and y < 200:
+    elif (15 < x < 45) and (50 < y < 55) and (-35 < z < -5):
         return 45  # Nota MIDI para un lowtom drum
     return None
+
+def corregir_mapa_profundidad(depth_frame, T, fx, fy, cx, cy):
+    """
+    Corrige el mapa de profundidad aplicando la transformación T de forma vectorizada.
     
+    Parámetros:
+      depth_frame: arreglo 2D de profundidad (por ejemplo, 480x640) en unidades (milímetros)
+      T: matriz de transformación 4x4 (numpy.array) que compensa el offset entre proyector y cámara IR.
+      fx, fy: focales en píxeles
+      cx, cy: coordenadas del centro óptico
+      
+    Retorna:
+      nuevo_depth: mapa de profundidad corregido (2D, mismo tamaño que depth_frame)
+    """
+    H, W = depth_frame.shape
+    # Crear rejilla de coordenadas para cada píxel
+    grid_y, grid_x = np.indices((H, W))  # grid_y y grid_x tienen forma (H, W)
+    
+    # Aplanar los arreglos para operar vectorizadamente
+    grid_x = grid_x.flatten()  # forma (N,)
+    grid_y = grid_y.flatten()
+    depth = depth_frame.flatten()  # forma (N,)
+    
+    # Filtrar píxeles con profundidad válida (no cero)
+    valid = depth > 0
+    grid_x = grid_x[valid]
+    grid_y = grid_y[valid]
+    depth = depth[valid]
+    
+    # Convertir coordenadas de imagen (projective) a coordenadas reales 3D
+    X = (grid_x - cx) * depth / fx
+    Y = (grid_y - cy) * depth / fy
+    Z = depth
+    
+    # Formar las coordenadas homogéneas (N, 4)
+    points = np.stack([X, Y, Z, np.ones_like(Z)], axis=1)
+    
+    # Aplicar la transformación T a todos los puntos a la vez
+    points_corr = (T @ points.T).T  # forma (N, 4)
+    
+    # Reproyección a coordenadas de imagen: x' = (X'/Z') * fx + cx, y' = (Y'/Z') * fy + cy
+    X_corr = points_corr[:, 0]
+    Y_corr = points_corr[:, 1]
+    Z_corr = points_corr[:, 2]
+    
+    # Evitar división por cero (Z_corr no debe ser 0 en condiciones normales)
+    new_x = np.round((X_corr / Z_corr) * fx + cx).astype(int)
+    new_y = np.round((Y_corr / Z_corr) * fy + cy).astype(int)
+    
+    # Filtrar los puntos que caen dentro de los límites de la imagen
+    valid_idx = (new_x >= 0) & (new_x < W) & (new_y >= 0) & (new_y < H)
+    new_x = new_x[valid_idx]
+    new_y = new_y[valid_idx]
+    Z_corr = Z_corr[valid_idx]
+    
+    # Crear un mapa de profundidad nuevo, inicializado con infinito para la operación de mínimo
+    new_depth_flat = np.full(H * W, np.inf, dtype=np.float32)
+    # Calcular índices planos de los píxeles reproyectados
+    flat_idx = new_y * W + new_x
+    
+    # Utilizar scatter-min: para cada índice, asignar el menor valor de Z_corr
+    np.minimum.at(new_depth_flat, flat_idx, Z_corr)
+    
+    # Reemplazar los valores que quedaron en inf (sin asignación) por 0
+    new_depth_flat[new_depth_flat == np.inf] = 0.0
+    # Remodelar el arreglo a la forma original de la imagen
+    nuevo_depth = new_depth_flat.reshape(H, W)
+    
+    return nuevo_depth
+
+def aprox_depth_disp(depth_frame, Xp, Yp):
+    disparidad = 50
+    Xp_min = max(Xp - disparidad, 0)
+    Xp_max = min(Xp + disparidad, depth_frame.shape[1])  # Asegurar que no exceda las columnas
+    # Extraer valores dentro de los límites
+    z_value = depth_frame[Yp, Xp_min:Xp_max]
+    z_value = z_value[z_value != 0]
+
+    if z_value.size > 0:
+        # Obtener el valor mínimo y convertirlo a entero
+        z_value_min = int(np.min(z_value))
+        return z_value_min
+    else:
+        disparidad = 100
+        Xp_min = max(Xp - disparidad, 0)
+        Xp_max = min(Xp + disparidad, depth_frame.shape[1])  # Asegurar que no exceda las columnas
+        # Extraer valores dentro de los límites
+        z_value = depth_frame[Yp, Xp_min:Xp_max]
+        z_value = z_value[z_value != 0]
+        if z_value.size > 0:
+            # Obtener el valor mínimo y convertirlo a entero
+            z_value_min = int(np.min(z_value))
+            return z_value_min
+        else:
+            disparidad = 200
+            Xp_min = max(Xp - disparidad, 0)
+            Xp_max = min(Xp + disparidad, depth_frame.shape[1])  # Asegurar que no exceda las columnas
+            # Extraer valores dentro de los límites
+            z_value = depth_frame[Yp, Xp_min:Xp_max]
+            z_value = z_value[z_value != 0]
+            if z_value.size > 0:
+                # Obtener el valor mínimo y convertirlo a entero
+                z_value_min = int(np.min(z_value))
+                return z_value_min
+    return 0
+
 ##########################
 # 1. Hilo de captura (sensor)
 ##########################
@@ -184,7 +319,13 @@ def sensor_capture_thread():
             if not data_sync.get_state()['button']:
                 if data_sync.get_state()['offset_time_camera'] == 0:
                     data_sync.update_camera_time(time.time())
-                sensor_queue.put((imu_data))
+                acc, gyro, mag, ref_time, ref_but = visualizer.parse_sensor_data(imu_data, 0)
+                if ref_but == 0:
+                    data_sync.set_button_repeat(True)
+                    data_sync.update_camera_time(time.time())
+                    data_sync.update_imu_time(ref_time)
+                    ref_but = 1
+                sensor_queue.put((acc, gyro, mag, ref_time))
                 end_time = time.time()
                 # print(f"Tiempo de procesamiento captura: {end_time - start_time:.5f} segundos")
             time.sleep(0.015)  # 10ms entre muestras
@@ -201,27 +342,28 @@ def image_processing_thread():
         depth_frame = depth_stream.read_frame()
         color_data = np.array(color_frame.get_buffer_as_triplet()).reshape((color_frame.height, color_frame.width, 3))    
         color_data = cv2.cvtColor(color_data, cv2.COLOR_RGB2BGR)
-        depth_data = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
+        depth_corregido = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
 
         if color_data is not None:
             elapsed_time = time.time()
-            image_height = color_data.shape[0]
-            #depth_map = depth_estimator.ConvertToAbsoluteDepth(depth_estimator.estimate_depth(img),Cal_Poly)
-            results = model_yolo.predict(color_data, conf=0.25, stream=True)
+            results = model_yolo.predict(color_data, conf=0.4, stream=True)
             points = {}
 
             for r in results:
+                # depth_corregido = corregir_mapa_profundidad(depth_data, T_prof, mtx_prof[0,0], mtx_prof[1,1], mtx_prof[0,2], mtx_prof[1,2])
                 for box in r.boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2
-                    z_value = int(depth_data[Yp, Xp])
+                    # z_value = int(depth_corregido[Yp, Xp])
+                    z_value = aprox_depth_disp(depth_corregido, Xp, Yp)
 
-                    XY_stereo = np.dot(Rot_matrix, np.array([[Xp], [Yp], [z_value]])) + tras_vector
-                    if int(XY_stereo[1,0]) > 480:
-                        XY_stereo[1,0] = 480
-                    if int(XY_stereo[0,0]) > 640:
-                        XY_stereo[0,0] = 640
-                    z_value = int(depth_data[int(XY_stereo[1,0]), int(XY_stereo[0,0])])
+                    # XY_stereo = np.dot(Rot_matrix_stereo, np.array([[Xp], [Yp], [z_value]])) + tras_vector_stereo
+                    # if int(XY_stereo[1,0]) > 480:
+                    #     XY_stereo[1,0] = 480
+                    # if int(XY_stereo[0,0]) > 640:
+                    #     XY_stereo[0,0] = 640
+                    # # z_value = int(depth_corregido[int(XY_stereo[1,0]), int(XY_stereo[0,0])])
+                    # z_value = aprox_depth_disp(depth_corregido, XY_stereo[0,0], XY_stereo[1,0])
 
                     confidence = math.ceil((box.conf[0] * 100)) / 100
                     cls = int(box.cls[0])
@@ -239,11 +381,14 @@ def image_processing_thread():
                 (X_red, Y_red, Z_red) = points["drumsticks_mid"]
                 if data_sync.get_state()['button']:
                     data_sync.set_offsets(X_blue, Y_blue, Z_blue)
+                if data_sync.get_state()['button_repeat']:
+                    data_sync.set_offsets(X_blue, Y_blue, Z_blue)
+                    data_sync.set_button_repeat(False)  
                 if not data_sync.get_state()['button']:
                     camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time))
 
             cv2.imshow("Cam", color_data)
-            cv2.imshow("Depth", depth_data)
+            cv2.imshow("Depth", depth_corregido)
 
         end_time = time.time()
         # print(f"Tiempo de procesamiento camara: {end_time - start_time:.3f} segundos")
@@ -265,21 +410,23 @@ def kalman_update_thread():
     imu_time = 0
     u_ia_pos = np.zeros((3, 1))
     u_ia_ori = np.zeros((4, 1))
+    acc = np.zeros((3, 1))
+    note = None
 
     while not stop_event.is_set():
         start_time = time.time()
         try:
-            imu_data = sensor_queue.get(block=False)
+            acc, gyro, mag, milisegundos = sensor_queue.get(block=False)
             flag_imu_empty = False
         except Empty:
             flag_imu_empty = True
-            print("La cola sensor_queue está vacía.")
+            # print("La cola sensor_queue está vacía.")
         try:
             X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time = camara_queue.get(block=False)
             flag_cam_empty = False
         except Empty:
             flag_cam_empty = True
-            print("La cola camara_queue está vacía.")
+            # print("La cola camara_queue está vacía.")
 
     ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
         if not flag_cam_empty:
@@ -314,13 +461,12 @@ def kalman_update_thread():
 
     ################################################# ACTUALIZAR FILTROS DE KALMAN
         if not flag_imu_empty:
-            acc, gyro, mag, milisegundos, _ = visualizer.parse_sensor_data(data_string = imu_data, ref = 0)
             imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
-            print("imu_time: ", imu_time)
+            # print("imu_time: ", imu_time)
         
         if not flag_cam_empty:   
             camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
-            print("camera_time: ", camera_time)
+            # print("camera_time: ", camera_time)
 
         if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty:
             state = data_sync.get_state()
@@ -336,31 +482,27 @@ def kalman_update_thread():
                 u_ia_ori = np.array([qw,qx,qy,qz])
                 u_ia_ori = u_ia_ori.reshape(4, 1)
 
-                print("u_ia_pos: ", u_ia_pos)
+                # print("u_ia_pos: ", u_ia_pos)
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
+                print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
             else:    
                 visualizer.update_kf(gyro = gyro, mag = mag, acc = acc)
+                # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
 
-            graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
+            # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
 
-            print("X (c/cam): ", visualizer.x_estimado[0])
-            print("Y (c/cam): ", visualizer.x_estimado[1])
-            print("Z (c/cam): ", visualizer.x_estimado[2])
         elif not flag_imu_empty:
             visualizer.update_kf(gyro = gyro, mag = mag, acc = acc)
 
-            graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
-            
-            print("X (s/cam): ", visualizer.x_estimado[0])
-            print("Y (s/cam): ", visualizer.x_estimado[1])
-            print("Z (s/cam): ", visualizer.x_estimado[2])
+            # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
+
+            # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
 
         # end_time = time.time()
         # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
-        
-        # midi_note = map_position_to_midi(X_blue, Y_blue)
-        # send_midi_note(midi_note)
-            
+        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]))
+        # print("midi note: ", midi_note)
+        send_midi_note(midi_note, acc)
         time.sleep(0.018)  # 18ms entre muestras
 
 with open("detections.txt", "w") as file:
@@ -377,41 +519,24 @@ t1.start()
 t2.start()
 t3.start()
 
-def update_graf(frame):
-    global contador_grafico
-    X, Y, Z = graf_queue.get()
-    if contador_grafico > 25:
-        t_data.append(t_data[-1] + 1 if t_data else 0)  # Aumenta el contador
-        x_data.append(X)  # Aquí pondrías los valores reales
-        y_data.append(Y)
-        z_data.append(Z)
+# def update_graf():
+#     global contador_grafico
+#     X, Y, Z = graf_queue.get()
+#     if contador_grafico > 10:
+#         update_point(X, Y, Z)
+#         contador_grafico = 0
+#     else:
+#         contador_grafico += 1
 
-        # Solo actualizamos los datos, no recreamos el gráfico
-        line1.set_xdata(range(len(x_data)))
-        line1.set_ydata(x_data)
-        
-        line2.set_xdata(range(len(y_data)))
-        line2.set_ydata(y_data)
-        
-        line3.set_xdata(range(len(z_data)))
-        line3.set_ydata(z_data)
-
-        contador_grafico = 0
-        
-        return line1, line2, line3
-    else:
-        contador_grafico += 1
-        return line1, line2, line3
-
-# FuncAnimation se encarga de llamar a update() cada 100 ms
-ani = FuncAnimation(fig, update_graf, init_func=init, interval=20, blit=True, cache_frame_data=False)
-
-plt.tight_layout()
-plt.show()
+# # Temporizador para actualizar la gráfica en tiempo real
+# timer = pg.QtCore.QTimer()
+# timer.timeout.connect(update_graf)
+# timer.start(20)  # Actualiza cada 20 ms 
 
 # Mantenemos el hilo principal vivo (por ejemplo, con un bucle infinito o esperando a que terminen los hilos)
 try:
     while not stop_event.is_set():
+        # sys.exit(app.exec_())
         time.sleep(1)
 except KeyboardInterrupt:
     print("Terminando la ejecución...")

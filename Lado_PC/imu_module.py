@@ -73,17 +73,17 @@ class IMUVisualizer:
                                 [0,                 0,                  self.dt         ]])
 
         # Matriz de covarianza inicial (P)
-        self.P_pos = np.eye(6) * 0.05  # Incertidumbre inicial en posición y velocidad
-        self.P_fus_ori = np.eye(4) * 5 # Incertidumbre inicial de la posición
+        self.P_pos = np.eye(6) * 5  # Incertidumbre inicial en posición y velocidad
+        self.P_fus_ori = np.eye(4) * 1 # Incertidumbre inicial de la posición
 
         # Matriz de covarianza del proceso (Q): incertidumbre del modelo
-        self.Q_pos = np.eye(6) * 5
+        self.Q_pos = np.eye(6) * 10
         self.Q_fus_ori = np.eye(4) * 0.5
 
         # Matriz de covarianza de las mediciones (R): incertidumbre del sensor
-        self.R_pos = np.eye(3) *50
-        self.R_fus_ori_ia = np.eye(4) * 0.01
-        self.R_fus_ori_sensor = np.eye(4) * 0.1
+        self.R_pos = np.eye(3) *1
+        self.R_fus_ori_ia = np.eye(4) * 0.1
+        self.R_fus_ori_sensor = np.eye(4) * 0.8
 
         # Matriz de medición (H):
         self.H_pos = np.array([ [1, 0, 0, 0, 0, 0],

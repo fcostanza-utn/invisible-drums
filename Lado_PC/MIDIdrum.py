@@ -16,7 +16,7 @@ sounds = {
 }
 
 # Función para reproducir el sonido correspondiente a la nota MIDI
-def play_drum(note):
+def play_drum(note, volume):
     if note in sounds:
         sounds[note].play()
     else:
@@ -33,6 +33,6 @@ with mido.open_input('MIDI1 0') as port:
             # Solo procesa mensajes de nota on
             if msg.type == 'note_on' and msg.velocity > 0:
                 print(f"Received note: {msg.note}")
-                play_drum(msg.note)
+                play_drum(msg.note, (msg.velocity/100))
     except KeyboardInterrupt:
         print("Stopped by user.")

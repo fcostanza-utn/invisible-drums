@@ -3,6 +3,7 @@ import threading
 class DataSynchronizer:
     def __init__(self):
         self.button = True
+        self.button_repeat = False
         self.offset_time_camera = 0
         self.offset_time_imu = 0
         self.x_offset = 0
@@ -28,10 +29,15 @@ class DataSynchronizer:
         with self.lock:
             self.button = value
 
+    def set_button_repeat(self, value: bool):
+        with self.lock:
+            self.button_repeat = value
+
     def get_state(self):
         with self.lock:
             return {
                 'button': self.button,
+                'button_repeat': self.button_repeat,
                 'offset_time_camera': self.offset_time_camera,
                 'offset_time_imu': self.offset_time_imu,
                 'x_offset': self.x_offset,
