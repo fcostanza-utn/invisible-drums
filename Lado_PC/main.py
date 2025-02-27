@@ -187,22 +187,22 @@ def map_position_to_midi(x, y, z, time):
     y = y * 100
     z = z * 100
     if time - ref_time_midi > 0.15:
-        if (-25 < x < 5) and (45 < y < 47) and (-30 < z < 0):
+        if (-22.5 < x < 2.5) and (42.5 < y < 52.5) and (-27.5 < z < -2.5):
             ref_time_midi = time
             return 38  # Nota MIDI para un snare drum
-        elif (-50 < x < -20) and (15 < y < 17) and (-25 < z < 5):
+        elif (-50 < x < -20) and (12.5 < y < 22.5) and (-25 < z < 5):
             ref_time_midi = time
             return 42  # Nota MIDI para un hihat drum
-        elif (-50 < x < -20) and (0 < y < 3) and (-60 < z < -30):
+        elif (-50 < x < -20) and (-2.5 < y < 2.5) and (-60 < z < -30):
             ref_time_midi = time
             return 49  # Nota MIDI para un crash drum
-        elif (20 < x < 50) and (15 < y < 17) and (-55 < z < -15):
+        elif (20 < x < 50) and (12.5 < y < 22.5) and (-55 < z < -15):
             ref_time_midi = time
             return 51  # Nota MIDI para un ride drum
-        elif (-30 < x < 0) and (20 < y < 23) and (-65 < z < -35):
+        elif (-30 < x < 0) and (17.5 < y < 27.5) and (-65 < z < -35):
             ref_time_midi = time
             return 50  # Nota MIDI para un hightom drum
-        elif (15 < x < 45) and (50 < y < 52) and (-35 < z < -5):
+        elif (15 < x < 45) and (42.5 < y < 52.5) and (-35 < z < -5):
             ref_time_midi = time
             return 45  # Nota MIDI para un lowtom drum
     return None
