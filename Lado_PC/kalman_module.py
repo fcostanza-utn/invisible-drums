@@ -294,6 +294,7 @@ class IMUVisualizer:
         acc = np.array(self.acc)
         u = self.remove_gravity(acc, self.Q)
         u = u.reshape(3, 1)
+
         # 1. Predicción
         x_t = np.dot(self.F_pos, self.x_pos) + np.dot(self.B_pos, u)                 # Predicción del estado
         P_t = np.dot(np.dot(self.F_pos, self.P_pos), self.F_pos.T) + self.Q_pos      # Predicción de la covarianza
@@ -391,7 +392,7 @@ class IMUVisualizer:
             sensor_data = self.parse_sensor_data(raw_data, 0)
             self.acc, self.gyro, self.mag, _, _ = sensor_data
             
-        self.acond_info_imu(self.gyro, self.mag, self.acc)
+        self.acond_info_imu(gyro, mag, acc)
 ################################################################## Kalman de Orientación
         self.Q = self.ekf.update(self.Q_buff, self.gyro, self.acc, self.mag, self.dt)
         self.Q_buff = self.Q

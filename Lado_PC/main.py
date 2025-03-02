@@ -189,7 +189,7 @@ def map_position_to_midi(x, y, z, time, vel_x, vel_y, vel_z):
     x = x * 100
     y = y * 100
     z = z * 100
-    if time - ref_time_midi > 0.25:
+    if time - ref_time_midi > 0.15:
         if (-24 < x < 6) and (57.5 < y < 62.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
             ref_time_midi = time
             return 38  
@@ -576,7 +576,7 @@ def kalman_update_thread():
 
                 # print("u_ia_pos: ", u_ia_pos)
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-                # print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
             else:    
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
                 # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
@@ -604,7 +604,7 @@ def kalman_update_thread():
 
             # print("u_ia_pos: ", u_ia_pos)
             visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-            # print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+            print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
         
 
         kalman_time = time.time()
