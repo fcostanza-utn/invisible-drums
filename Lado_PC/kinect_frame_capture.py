@@ -26,11 +26,11 @@ def main():
     # color_stream.set_video_mode(openni2.VideoMode(pixelFormat=openni2.PIXEL_FORMAT_RGB888, resolutionX=640, resolutionY=480, fps=30))
 
     # Crear la carpeta para guardar las imágenes si no existe
-    dataset_dir = "C:/Users/fgcos/Pictures/YOLO_TRAINING/Dataset_4_kinect"
+    dataset_dir = "C:/Users/fgcos/Pictures/YOLO_TRAINING/Dataset_5_kinect"
     if not os.path.exists(dataset_dir):
         os.makedirs(dataset_dir)
 
-    frame_count = 0
+    frame_count = 3128
     print("Capturando frames. Presiona 'q' en la ventana de imagen para salir.")
 
     while True:

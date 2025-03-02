@@ -7,12 +7,12 @@ pygame.init()
 # Carga los sonidos de batería
 sounds = {
     36: "./Samples/kick.wav",   # Nota MIDI 36 para el kick drum
-    38: "./Samples/snare.wav",  # Nota MIDI 38 para la caja
-    42: "./Samples/hihat.wav",  # Nota MIDI 42 para el hi-hat cerrado
-    49: "./Samples/crash.wav",  # Nota MIDI 49 para el crash
-    51: "./Samples/ride.wav",  # Nota MIDI 51 para el ride
-    50: "./Samples/hightom.wav",  # Nota MIDI 50 para el tom alto
-    45: "./Samples/lowtom.wav",  # Nota MIDI 45 para el tom bajo
+    38: "./Samples/Ensoniq-ESQ-1-Snare.wav",  # Nota MIDI 38 para la caja
+    42: "./Samples/Closed-Hi-Hat-1.wav",  # Nota MIDI 42 para el hi-hat cerrado
+    49: "./Samples/Crash-Cymbal-1.wav",  # Nota MIDI 49 para el crash
+    51: "./Samples/Korg-NS5R-Power-Ride-Cymbal.wav",  # Nota MIDI 51 para el ride
+    50: "./Samples/Hi-Tom-1.wav",  # Nota MIDI 50 para el tom alto
+    45: "./Samples/Floor-Tom-1.wav",  # Nota MIDI 45 para el tom bajo
 }
 
 # Función para reproducir el sonido correspondiente a la nota MIDI

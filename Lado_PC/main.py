@@ -186,7 +186,7 @@ def map_position_to_midi(x, y, z, time):
     x = x * 100
     y = y * 100
     z = z * 100
-    if time - ref_time_midi > 0.15:
+    if time - ref_time_midi > 0.25:
         if (-22.5 < x < 2.5) and (42.5 < y < 52.5) and (-27.5 < z < -2.5):
             ref_time_midi = time
             return 38  # Nota MIDI para un snare drum
@@ -199,7 +199,7 @@ def map_position_to_midi(x, y, z, time):
         elif (20 < x < 50) and (12.5 < y < 22.5) and (-55 < z < -15):
             ref_time_midi = time
             return 51  # Nota MIDI para un ride drum
-        elif (-30 < x < 0) and (17.5 < y < 27.5) and (-65 < z < -35):
+        elif (-30 < x < 0) and (17.5 < y < 27.5) and (-75 < z < -45):
             ref_time_midi = time
             return 50  # Nota MIDI para un hightom drum
         elif (15 < x < 45) and (42.5 < y < 52.5) and (-35 < z < -5):
@@ -338,7 +338,7 @@ def sensor_capture_thread():
                 sensor_queue.put((acc, gyro, mag, ref_time))
                 end_time = time.time()
                 # print(f"Tiempo de procesamiento captura: {end_time - start_time:.5f} segundos")
-            time.sleep(0.015)  # 10ms entre muestras
+            time.sleep(0.015)  # 15ms entre muestras
 
     
 ##########################
@@ -347,7 +347,32 @@ def sensor_capture_thread():
 def image_processing_thread():
     while not stop_event.is_set():
         start_time = time.time()
-
+        CuerposBateria = [
+            {
+                'name':"snare drum",
+                'position':(0,0)
+            },
+            {
+                'name':"hihat drum",
+                'position':(0,0)
+            },
+            {
+                'name':"crash drum",
+                'position':(0,0)
+            },
+            {
+                'name':"ride drum",
+                'position':(0,0)
+            },
+            {
+                'name': "hightom drum",
+                'position': (0,0)
+            },
+            {
+                'name':"lowtom drum",
+                'position':(0,0)
+            }
+            ]
         color_frame = color_stream.read_frame()
         depth_frame = depth_stream.read_frame()
         color_data = np.array(color_frame.get_buffer_as_triplet()).reshape((color_frame.height, color_frame.width, 3))    
@@ -380,7 +405,7 @@ def image_processing_thread():
                     class_name = classNames[cls]
 
                     cv2.rectangle(color_data, (x1, y1), (x2, y2), (255, 0, 255), 3)
-                    cv2.putText(color_data, f"{class_name} {confidence} Coord:({Xp},{Yp},{z_value})",
+                    cv2.putText(color_data, f"Coord:({Xp},{Yp},{z_value})",
                                 (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
                     points[class_name] = (Xp, Yp, z_value)
 
@@ -407,6 +432,16 @@ def image_processing_thread():
                 if not data_sync.get_state()['button']:
                     camara_queue.put((X_blue, Y_blue, Z_blue, 1000, 1000, 1000, elapsed_time))
 
+            # if not data_sync.get_state()['button']:
+            #     x_offset = data_sync.get_state()['x_offset']
+            #     y_offset = data_sync.get_state()['y_offset']
+            #     CuerposBateria[0]['position'] = (x_offset-37, y_offset+192)
+            #     CuerposBateria[1]['position'] = (x_offset-225, y_offset+111)
+            #     CuerposBateria[2]['position'] = (x_offset-188, y_offset-39)
+            #     CuerposBateria[3]['position'] = (x_offset+175, y_offset+84)
+            #     CuerposBateria[5]['position'] = (x_offset+125, y_offset+230)
+            #     for cuerpo in CuerposBateria:
+            #         cv2.putText(color_data, cuerpo['name'], cuerpo['position'], cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             cv2.imshow("Cam", color_data)
             cv2.imshow("Depth", depth_corregido)
 
@@ -544,7 +579,7 @@ def kalman_update_thread():
         midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), kalman_time)
         #print("acc: ", (np.linalg.norm(acc) - 1))
         send_midi_note(midi_note, acc)
-        time.sleep(0.018)  # 18ms entre muestras
+        time.sleep(0.008)  # 8ms entre muestras
 
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
