@@ -18,68 +18,98 @@ except FileNotFoundError:
 # Se asume que el productor escribe 3 valores (x, y, z) de tipo double.
 coords = np.ndarray((3,), dtype='d', buffer=shm.buf)
 
-# Configuración del gráfico 3D.
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
+# Crear una única figura con dos subplots 3D (lado a lado)
+fig, (ax1, ax2) = plt.subplots(1, 2, subplot_kw={'projection': '3d'}, figsize=(12, 6))
 
-# Dibujar círculos fijos paralelos al eje Z (planos horizontales a diferentes alturas).
-radio = 15  # Radio de 15 cm para un diámetro de 30 cm.
-theta = np.linspace(0, 2 * np.pi, 100)
-alturas = [0, 10, 20]  # Ejemplo de alturas fijas.
-for z in alturas:
-    x_circ = radio * np.cos(theta)
-    y_circ = radio * np.sin(theta)
-    ax.plot(x_circ, y_circ, zs=z, color='gray', linestyle='--', alpha=0.7)
+# Función para dibujar la geometría estática (tambores, platillos) en un eje dado.
+def plot_instruments(ax):
+    # Dibujo de los tambores y Hi-hat.
+    radio = 15
+    theta = np.linspace(0, 2 * np.pi, 100)
+    despl_x = [-9, -11, 32, -41]        # Snare / High-tom / Low-tom / Hi-hat
+    despl_z = [-11, -52, -12, -9]        # Snare / High-tom / Low-tom / Hi-hat
+    alturas = [60, 17, 50, 30]           # Snare / High-tom / Low-tom / Hi-hat
+    for y, z, x in zip(alturas, despl_z, despl_x):
+        x_circ = radio * np.cos(theta) + x
+        z_circ = radio * np.sin(theta) + z
+        # Usamos np.full_like para crear un vector con la altura constante
+        ax.plot(x_circ, np.full_like(x_circ, y), z_circ, color='cyan', linestyle='--', alpha=0.7)
+    
+    # Dibujo de los platillos (Crash / Ride).
+    radio = 20
+    theta = np.linspace(0, 2 * np.pi, 100)
+    despl_x = [-33, 31]         # Crash / Ride
+    despl_z = [-36, -41]        # Crash / Ride
+    alturas = [17, 20]         # Crash / Ride
+    for y, z, x in zip(alturas, despl_z, despl_x):
+        x_circ = radio * np.cos(theta) + x
+        z_circ = radio * np.sin(theta) + z
+        ax.plot(x_circ, np.full_like(x_circ, y), z_circ, color='cyan', linestyle='--', alpha=0.7)
+    
+    # Configuración de los límites y etiquetas.
+    ax.set_xlim(-80, 80)
+    ax.set_ylim(-80, 80)
+    ax.set_zlim(-80, 80)
+    ax.set_xlabel('X (cm)')
+    ax.set_ylabel('Y (cm)')
+    ax.set_zlabel('Z (cm)')
 
-# Configuración de los límites y etiquetas del gráfico.
-ax.set_xlim(-20, 20)
-ax.set_ylim(-20, 20)
-ax.set_zlim(0, 50)
-ax.set_xlabel('X (cm)')
-ax.set_ylabel('Y (cm)')
-ax.set_zlabel('Z (cm)')
+# Dibujar la misma información estática en ambos subplots.
+plot_instruments(ax1)
+plot_instruments(ax2)
 
-# Elementos gráficos:
-# - Una línea para el trazo de la trayectoria.
-# - Un punto que indica la posición actual.
-trail_line, = ax.plot([], [], [], 'r-', lw=2, label='Trayectoria')
-current_point, = ax.plot([], [], [], 'bo', markersize=8, label='Punto actual')
+# Crear los elementos gráficos (línea de trayectoria y punto actual) para cada subplot.
+trail_line1, = ax1.plot([], [], [], 'r-', lw=2, label='Trayectoria')
+current_point1, = ax1.plot([], [], [], 'bo', markersize=8, label='Punto actual')
+trail_line2, = ax2.plot([], [], [], 'r-', lw=2, label='Trayectoria')
+current_point2, = ax2.plot([], [], [], 'bo', markersize=8, label='Punto actual')
 
-# Lista para almacenar los puntos del trazo (cada elemento es una tupla: (tiempo, (x, y, z))).
+# Lista para almacenar los puntos de la trayectoria.
 trail_points = []
 
-# Función de actualización del gráfico (se ejecuta cada 100ms).
+# Función de actualización de la animación.
 def actualizar(frame):
-    # Leemos las coordenadas actuales desde la memoria compartida.
-    x = coords[0]
-    y = coords[1]
-    z = coords[2]
+    # Leemos las coordenadas actuales desde la memoria compartida y escalamos a cm.
+    x = coords[0] * 100
+    y = coords[1] * 100
+    z = coords[2] * 100
     tiempo_actual = time.time()
     trail_points.append((tiempo_actual, (x, y, z)))
     
-    # Se eliminan del rastro los puntos con más de 30 segundos de antigüedad.
-    while trail_points and (tiempo_actual - trail_points[0][0] > 30):
+    # Eliminamos los puntos con más de 2 segundos de antigüedad.
+    while trail_points and (tiempo_actual - trail_points[0][0] > 1):
         trail_points.pop(0)
     
-    # Actualizar la línea de la trayectoria.
+    # Actualizar la trayectoria si hay puntos.
     if trail_points:
         data = np.array([p for _, p in trail_points])
-        trail_line.set_data(data[:, 0], data[:, 1])
-        trail_line.set_3d_properties(data[:, 2])
+        # Actualización para el primer subplot
+        trail_line1.set_data(data[:, 0], data[:, 1])
+        trail_line1.set_3d_properties(data[:, 2])
+        # Actualización para el segundo subplot
+        trail_line2.set_data(data[:, 0], data[:, 1])
+        trail_line2.set_3d_properties(data[:, 2])
     else:
-        trail_line.set_data([], [])
-        trail_line.set_3d_properties([])
+        trail_line1.set_data([], [])
+        trail_line1.set_3d_properties([])
+        trail_line2.set_data([], [])
+        trail_line2.set_3d_properties([])
     
-    # Actualizar la posición del punto actual.
-    current_point.set_data([x], [y])
-    current_point.set_3d_properties([z])
+    # Actualizar el punto actual en ambos subplots.
+    current_point1.set_data([x], [y])
+    current_point1.set_3d_properties([z])
+    current_point2.set_data([x], [y])
+    current_point2.set_3d_properties([z])
     
-    return trail_line, current_point
+    return trail_line1, current_point1, trail_line2, current_point2
 
-# Creamos la animación que se actualiza cada 100ms.
+# Crear la animación utilizando la figura que contiene ambos subplots.
 ani = FuncAnimation(fig, actualizar, interval=100, blit=False)
 
-plt.legend()
+# Agregar leyendas a cada eje.
+ax1.legend()
+ax2.legend()
+
 plt.show()
 
 # Al cerrar la ventana, liberamos la conexión a la memoria compartida.

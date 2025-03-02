@@ -6,7 +6,7 @@ from openni import openni2
 import math
 from collections import deque
 import mido
-from imu_module import IMUVisualizer
+from kalman_module import IMUVisualizer
 from PyQt5 import QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
@@ -17,6 +17,9 @@ import numpy as np
 from data_sync import DataSynchronizer
 from queue import Queue, Empty
 import threading
+import csv
+from multiprocessing import shared_memory
+from RW_LOCK import RWLock
 
 """
 Variables de datos y control
@@ -27,6 +30,8 @@ processing_flag = True
 data_sync = DataSynchronizer()      # Instancia compartida para sincronizar datos entre hilos
 
 stop_event = threading.Event()      # Creamos un evento que actuará como bandera para detener el hilo
+
+rwlock = RWLock()
 
 tip_points = []
 mid_points = []
@@ -67,7 +72,12 @@ Rot_matrix_stereo = np.array([[9.9997269257755e-01,     6.7448757651869e-03,    
                               [-6.7584186667168e-03,    9.9996705075785e-01,    -4.4967961679709e-03],
                               [2.9896281242425e-03,     4.5170841881792e-03,    9.9998532892944e-01]])
 
-contador_grafico = 0
+contador_imu = 0
+
+# Nombre que se usará para identificar la memoria compartida del graficador.
+SHM_NAME_GRAF = 'coords_shared'
+# Nombre que se usará para identificar la memoria compartida del esp.
+SHM_NAME_ESP = 'esp_shared'
 
 # Configuración graficos
 num_muestras = 100  # Número de muestras visibles en el eje X
@@ -85,12 +95,28 @@ camara_queue = Queue(maxsize=100)   # Para datos crudos de la cámara
 graf_queue = Queue(maxsize=100)   # Para datos crudos para graficar
 
 """
+Memoria compartida
+"""
+# Se crea la memoria compartida para 3 valores de tipo double.
+# El tamaño se calcula como 3 * tamaño de un double.
+shm_graf = shared_memory.SharedMemory(create=True, name=SHM_NAME_GRAF, size=3 * np.dtype('d').itemsize)
+# Creamos un array numpy que utiliza el buffer de la memoria compartida.
+coords = np.ndarray((3,), dtype='d', buffer=shm_graf.buf)
+
+# Intentamos conectar con la memoria compartida ya creada
+try:
+    shm_esp = shared_memory.SharedMemory(name=SHM_NAME_ESP)
+except FileNotFoundError:
+    print(f"No se encontró la memoria compartida con nombre '{SHM_NAME_ESP}'. Asegúrate de que el productor la haya creado.")
+    exit(1)
+imu_data = np.ndarray((1,), dtype='U100', buffer=shm_esp.buf)
+"""
 INICIALIZACION DE YOLO y Midas
 """
 # modelo YOLO
 # modelo YOLO
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model_yolo = YOLO("yolo-Weights/best_yolo11m_vKinect.pt").to(device)
+model_yolo = YOLO("yolo-Weights/best_yolo11m_v3Kinect.pt").to(device)
 classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
 
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
@@ -120,7 +146,7 @@ color_stream.start()
 """
 INICIALIZACION DE IMU
 """
-visualizer = IMUVisualizer('192.168.1.70', 80, 0.02)
+visualizer = IMUVisualizer(dt=0.02)
 """
 INICIALIZACION DE MIDI
 """
@@ -128,29 +154,6 @@ print("Available MIDI output ports:")
 print(mido.get_output_names())
 portmidi = mido.Backend('mido.backends.rtmidi')
 midi_out = portmidi.open_output('MIDI1 1')
-
-'''
-Graficos QT
-'''
-# # Crear una aplicación de PyQt
-# app = QtWidgets.QApplication(sys.argv)
-# window = gl.GLViewWidget()
-# window.show()
-# window.setWindowTitle('Gráfico 3D en Tiempo Real')
-# window.setCameraPosition(distance=0.5)
-# # Crear los ejes
-# axis = gl.GLAxisItem()
-# axis.setSize(10, 10, 10)
-# window.addItem(axis)
-# # Crear el punto en 3D
-# point = gl.GLScatterPlotItem()
-# window.addItem(point)
-
-# # Configuración inicial del punto
-# def update_point(x, y, z):
-#     data = np.array([[x, y, z]])
-#     data = np.squeeze(data)
-#     point.setData(pos=data, size=10, color=(1, 0, 0, 1))
 
 """
 FUNCIONES
@@ -181,30 +184,30 @@ def send_midi_note(note, acc):
             midi_out.send(mido.Message('note_on', note=note, velocity=100))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
 
-def map_position_to_midi(x, y, z, time):
+def map_position_to_midi(x, y, z, time, vel_x, vel_y, vel_z):
     global ref_time_midi
     x = x * 100
     y = y * 100
     z = z * 100
     if time - ref_time_midi > 0.25:
-        if (-22.5 < x < 2.5) and (42.5 < y < 52.5) and (-27.5 < z < -2.5):
+        if (-24 < x < 6) and (57.5 < y < 62.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
             ref_time_midi = time
-            return 38  # Nota MIDI para un snare drum
-        elif (-50 < x < -20) and (12.5 < y < 22.5) and (-25 < z < 5):
+            return 38  
+        elif (-56 < x < -26) and (27.5 < y < 32.5) and (-24 < z < 6):       # Nota MIDI para un hihat drum
             ref_time_midi = time
-            return 42  # Nota MIDI para un hihat drum
-        elif (-50 < x < -20) and (-2.5 < y < 2.5) and (-60 < z < -30):
+            return 42  
+        elif (-53 < x < -13) and (0 < y < 5) and (-56 < z < -16):           # Nota MIDI para un crash drum
             ref_time_midi = time
-            return 49  # Nota MIDI para un crash drum
-        elif (20 < x < 50) and (12.5 < y < 22.5) and (-55 < z < -15):
+            return 49  
+        elif (11 < x < 51) and (17.5 < y < 22.5) and (-61 < z < -21):       # Nota MIDI para un ride drum
             ref_time_midi = time
-            return 51  # Nota MIDI para un ride drum
-        elif (-30 < x < 0) and (17.5 < y < 27.5) and (-75 < z < -45):
+            return 51  
+        elif (-27 < x < 3) and (14.5 < y < 19.5) and (-67 < z < -37):       # Nota MIDI para un hightom drum
             ref_time_midi = time
-            return 50  # Nota MIDI para un hightom drum
-        elif (15 < x < 45) and (42.5 < y < 52.5) and (-35 < z < -5):
+            return 50  
+        elif (17 < x < 47) and (47.5 < y < 52.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
             ref_time_midi = time
-            return 45  # Nota MIDI para un lowtom drum
+            return 45  
     return None
 
 def corregir_mapa_profundidad(depth_frame, T, fx, fy, cx, cy):
@@ -312,24 +315,31 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
                 return z_value_min
     return 0
 
+def guardar_en_csv(nombre_archivo, dato1, dato2, dato3, dato4):
+    with open(nombre_archivo, mode='a', newline='') as archivo:
+        escritor = csv.writer(archivo)
+        escritor.writerow([dato1, dato2, dato3, dato4])
+    # print(f"Datos guardados en {nombre_archivo}")
+
 ##########################
 # 1. Hilo de captura (sensor)
 ##########################
 def sensor_capture_thread():
+    global contador_imu
     while not stop_event.is_set():
         start_time = time.time()
-        imu_data = visualizer.receive_data()  # Leer IMU
-        if not imu_data:
-            time.sleep(0.005)  # 5ms entre muestras
-        else: 
+        rwlock.acquire_read()
+        try:
             if data_sync.get_state()['button']:
-                _, _, _, ref_time, ref_but = visualizer.parse_sensor_data(imu_data, 0)
+                print("imu_data: ",imu_data[0])
+                _, _, _, ref_time, ref_but = visualizer.parse_sensor_data(imu_data[0], 0)
                 data_sync.set_button(ref_but)
                 data_sync.update_imu_time(ref_time)
             if not data_sync.get_state()['button']:
                 if data_sync.get_state()['offset_time_camera'] == 0:
                     data_sync.update_camera_time(time.time())
-                acc, gyro, mag, ref_time, ref_but = visualizer.parse_sensor_data(imu_data, 0)
+                print("imu_data: ",imu_data[0])
+                acc, gyro, mag, ref_time, ref_but = visualizer.parse_sensor_data(imu_data[0], 0)
                 if ref_but == 0:
                     data_sync.set_button_repeat(True)
                     data_sync.update_camera_time(time.time())
@@ -338,7 +348,10 @@ def sensor_capture_thread():
                 sensor_queue.put((acc, gyro, mag, ref_time))
                 end_time = time.time()
                 # print(f"Tiempo de procesamiento captura: {end_time - start_time:.5f} segundos")
-            time.sleep(0.015)  # 15ms entre muestras
+                contador_imu += 1
+        finally:
+            rwlock.release_read()
+        time.sleep(0.005)  # 5ms entre muestras
 
     
 ##########################
@@ -347,32 +360,7 @@ def sensor_capture_thread():
 def image_processing_thread():
     while not stop_event.is_set():
         start_time = time.time()
-        CuerposBateria = [
-            {
-                'name':"snare drum",
-                'position':(0,0)
-            },
-            {
-                'name':"hihat drum",
-                'position':(0,0)
-            },
-            {
-                'name':"crash drum",
-                'position':(0,0)
-            },
-            {
-                'name':"ride drum",
-                'position':(0,0)
-            },
-            {
-                'name': "hightom drum",
-                'position': (0,0)
-            },
-            {
-                'name':"lowtom drum",
-                'position':(0,0)
-            }
-            ]
+
         color_frame = color_stream.read_frame()
         depth_frame = depth_stream.read_frame()
         color_data = np.array(color_frame.get_buffer_as_triplet()).reshape((color_frame.height, color_frame.width, 3))    
@@ -381,12 +369,15 @@ def image_processing_thread():
 
         if color_data is not None:
             elapsed_time = time.time()
-            results = model_yolo.predict(color_data, conf=0.4, stream=True)
+            results = model_yolo.predict(color_data, conf=0.25, stream=True)
             points = {}
 
             for r in results:
                 # depth_corregido = corregir_mapa_profundidad(depth_data, T_prof, mtx_prof[0,0], mtx_prof[1,1], mtx_prof[0,2], mtx_prof[1,2])
+                tip_detected = False
+                mid_detected = False
                 for box in r.boxes:
+                    push = False
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2
                     # z_value = int(depth_corregido[Yp, Xp])
@@ -404,10 +395,19 @@ def image_processing_thread():
                     cls = int(box.cls[0])
                     class_name = classNames[cls]
 
-                    cv2.rectangle(color_data, (x1, y1), (x2, y2), (255, 0, 255), 3)
-                    cv2.putText(color_data, f"Coord:({Xp},{Yp},{z_value})",
-                                (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-                    points[class_name] = (Xp, Yp, z_value)
+                    if class_name == "drumsticks_tip" and tip_detected == False:
+                        push = True
+                        tip_detected = True
+                    
+                    if class_name == "drumsticks_mid" and mid_detected == False:
+                        push = True
+                        mid_detected = True
+                    
+                    if push:
+                        cv2.rectangle(color_data, (x1, y1), (x2, y2), (255, 0, 255), 3)
+                        cv2.putText(color_data, f"{class_name} {confidence} Coord:({Xp},{Yp},{z_value})",
+                                    (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                        points[class_name] = (Xp, Yp, z_value)
 
             # Dibujar línea entre drumsticks_mid y drumsticks_tip
             if "drumsticks_mid" in points and "drumsticks_tip" in points:
@@ -432,16 +432,6 @@ def image_processing_thread():
                 if not data_sync.get_state()['button']:
                     camara_queue.put((X_blue, Y_blue, Z_blue, 1000, 1000, 1000, elapsed_time))
 
-            # if not data_sync.get_state()['button']:
-            #     x_offset = data_sync.get_state()['x_offset']
-            #     y_offset = data_sync.get_state()['y_offset']
-            #     CuerposBateria[0]['position'] = (x_offset-37, y_offset+192)
-            #     CuerposBateria[1]['position'] = (x_offset-225, y_offset+111)
-            #     CuerposBateria[2]['position'] = (x_offset-188, y_offset-39)
-            #     CuerposBateria[3]['position'] = (x_offset+175, y_offset+84)
-            #     CuerposBateria[5]['position'] = (x_offset+125, y_offset+230)
-            #     for cuerpo in CuerposBateria:
-            #         cv2.putText(color_data, cuerpo['name'], cuerpo['position'], cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             cv2.imshow("Cam", color_data)
             cv2.imshow("Depth", depth_corregido)
 
@@ -452,6 +442,9 @@ def image_processing_thread():
             break
         time.sleep(0.005)  # 5ms entre muestras
     
+    shm_graf.close()
+    shm_graf.unlink()  
+    shm_esp.close() 
     openni2.unload()
     cv2.destroyAllWindows()
 
@@ -459,8 +452,11 @@ def image_processing_thread():
 # 3. Hilo de actualización del Kalman
 ##########################
 def kalman_update_thread():
+    global contador_imu
     flag_imu_empty = False
     flag_cam_empty = False
+    flag_no_more_cam = False
+    flag_no_more_imu = False
     camera_time = 0
     imu_time = 0
     u_ia_pos = np.zeros((3, 1))
@@ -474,21 +470,42 @@ def kalman_update_thread():
     qy = 0
     qz = 0
     kalman_time = 0
+    Z_blue_buff = 0
+    Z_red_buff = 0
+    open("datos.csv", mode='w', newline='')
 
     while not stop_event.is_set():
         start_time = time.time()
         try:
             acc, gyro, mag, milisegundos = sensor_queue.get(block=False)
+            imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
             flag_imu_empty = False
+            flag_no_more_imu = False
         except Empty:
             flag_imu_empty = True
             # print("La cola sensor_queue está vacía.")
         try:
             X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time = camara_queue.get(block=False)
+            camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
             flag_cam_empty = False
+            flag_no_more_cam = False
         except Empty:
             flag_cam_empty = True
             # print("La cola camara_queue está vacía.")
+
+        while (camera_time > imu_time) and  not flag_no_more_imu:
+            try:
+                acc, gyro, mag, milisegundos = sensor_queue.get(block=False)
+                imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
+            except Empty:
+                flag_no_more_imu = True  
+
+        while (((camera_time < imu_time - 50) or (camera_time > imu_time + 50))) and not flag_no_more_cam:
+            try:
+                X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time = camara_queue.get(block=False)
+                camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
+            except Empty:
+                flag_no_more_cam = True
 
         if not flag_cam_empty:
             if X_red == 1000 and Y_red == 1000 and Z_red == 1000:
@@ -503,6 +520,12 @@ def kalman_update_thread():
                 only_blue = False
                 time_only_blue = elapsed_time
 
+        # if ((Z_blue_buff + 500) < Z_blue) and not Z_blue_buff:
+        #     Z_blue = Z_blue_buff
+        #     Z_red = Z_red_buff
+        # else:
+        #     Z_blue_buff = Z_blue
+        #     Z_red_buff = Z_red
     ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
         if not flag_cam_empty and not only_blue:
             vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_red - Z_blue])
@@ -534,15 +557,9 @@ def kalman_update_thread():
                 qy = axis[1] * s
                 qz = axis[2] * s
 
-    ################################################# ACTUALIZAR FILTROS DE KALMAN
-        if not flag_imu_empty:
-            imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
-            # print("imu_time: ", imu_time)
-        
-        if not flag_cam_empty:
-            camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
-            # print("camera_time: ", camera_time)
-
+    ################################################# ACTUALIZAR FILTROS DE KALMAN     
+        # print(f"Tiempo de la cámara: {camera_time:.0f} ms")
+        # print(f"Tiempo del IMU: {imu_time:.0f} ms")
         if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty:
             state = data_sync.get_state()
             if not flag_cam_empty:
@@ -559,10 +576,10 @@ def kalman_update_thread():
 
                 # print("u_ia_pos: ", u_ia_pos)
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-                print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                # print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
             else:    
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-                print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
 
             # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
 
@@ -571,15 +588,39 @@ def kalman_update_thread():
 
             # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
 
-            print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+            # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+        
+        elif not flag_cam_empty:
+            if X_blue and Y_blue and not Z_blue:
+                Z_blue = u_ia_pos[2] * 1000 + state['z_offset']
+            else:
+                u_ia_pos[2] = (Z_blue - state['z_offset']) / 1000
+            u_ia_pos[0] = (((X_blue - mtx_rgb[0,2]) * Z_blue - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
+            u_ia_pos[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
+            u_ia_pos = u_ia_pos.reshape(3, 1)
 
-        # end_time = time.time()
-        # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
+            u_ia_ori = np.array([qw,qx,qy,qz])
+            u_ia_ori = u_ia_ori.reshape(4, 1)
+
+            # print("u_ia_pos: ", u_ia_pos)
+            visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
+            # print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+        
+
         kalman_time = time.time()
-        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), kalman_time)
+        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), kalman_time, float(visualizer.x_estimado[3]), float(visualizer.x_estimado[4]), float(visualizer.x_estimado[5]))
         #print("acc: ", (np.linalg.norm(acc) - 1))
         send_midi_note(midi_note, acc)
-        time.sleep(0.008)  # 8ms entre muestras
+        coords[0] = float(visualizer.x_estimado[0])
+        coords[1] = float(visualizer.x_estimado[1])
+        coords[2] = float(visualizer.x_estimado[2])
+
+
+        end_time = time.time()
+        time_kalman = end_time - start_time
+        guardar_en_csv("datos.csv", camera_time, imu_time, time_kalman, contador_imu)
+        # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
+        time.sleep(0.01)  # 10ms entre muestras
 
 with open("detections.txt", "w") as file:
     file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
@@ -595,19 +636,6 @@ t1.start()
 t2.start()
 t3.start()
 
-# def update_graf():
-#     global contador_grafico
-#     X, Y, Z = graf_queue.get()
-#     if contador_grafico > 10:
-#         update_point(X, Y, Z)
-#         contador_grafico = 0
-#     else:
-#         contador_grafico += 1
-
-# # Temporizador para actualizar la gráfica en tiempo real
-# timer = pg.QtCore.QTimer()
-# timer.timeout.connect(update_graf)
-# timer.start(20)  # Actualiza cada 20 ms 
 
 # Mantenemos el hilo principal vivo (por ejemplo, con un bucle infinito o esperando a que terminen los hilos)
 try:
@@ -618,4 +646,7 @@ except KeyboardInterrupt:
     print("Terminando la ejecución...")
     openni2.unload()
     cv2.destroyAllWindows()
+    shm_graf.close()
+    shm_esp.close()
+    shm_graf.unlink()
     sys.exit()
