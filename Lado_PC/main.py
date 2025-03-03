@@ -109,7 +109,7 @@ try:
 except FileNotFoundError:
     print(f"No se encontró la memoria compartida con nombre '{SHM_NAME_ESP}'. Asegúrate de que el productor la haya creado.")
     exit(1)
-imu_data = np.ndarray((1,), dtype='U100', buffer=shm_esp.buf)
+imu_data = np.ndarray((1,), dtype='U120', buffer=shm_esp.buf)
 """
 INICIALIZACION DE YOLO y Midas
 """
@@ -162,52 +162,55 @@ FUNCIONES
 def send_midi_note(note, acc):
     timeoff = 0.05
     if note:
-        if 0.2 < (np.linalg.norm(acc) - 1) <= 0.5:
+        if 0.5 < (acc) <= 1:
             midi_out.send(mido.Message('note_on', note=note, velocity=15))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 0.5 < (np.linalg.norm(acc) - 1) <= 1:
+        elif 1 < (acc) <= 1.5:
             midi_out.send(mido.Message('note_on', note=note, velocity=30))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 1 < (np.linalg.norm(acc) - 1) <= 1.5:
+        elif 1.5 < (acc) <= 2:
             midi_out.send(mido.Message('note_on', note=note, velocity=45))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 1.5 < (np.linalg.norm(acc) - 1) <= 2:
+        elif 2 < (acc) <= 2.5:
             midi_out.send(mido.Message('note_on', note=note, velocity=60))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 2 < (np.linalg.norm(acc) - 1) <= 2.5:
+        elif 2.5 < (acc) <= 3:
             midi_out.send(mido.Message('note_on', note=note, velocity=75))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 2.5 < (np.linalg.norm(acc) - 1) <= 3:
+        elif 3 < (acc) <= 3.5:
             midi_out.send(mido.Message('note_on', note=note, velocity=90))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 3 < (np.linalg.norm(acc) - 1):
+        elif 3.5 < (acc):
             midi_out.send(mido.Message('note_on', note=note, velocity=100))
             midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
 
-def map_position_to_midi(x, y, z, time, vel_x, vel_y, vel_z):
+def map_position_to_midi(x, y, z, time, acc_midi):
     global ref_time_midi
     x = x * 100
     y = y * 100
     z = z * 100
-    if time - ref_time_midi > 0.15:
-        if (-24 < x < 6) and (57.5 < y < 62.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
-            ref_time_midi = time
-            return 38  
-        elif (-56 < x < -26) and (27.5 < y < 32.5) and (-24 < z < 6):       # Nota MIDI para un hihat drum
-            ref_time_midi = time
-            return 42  
-        elif (-53 < x < -13) and (0 < y < 5) and (-56 < z < -16):           # Nota MIDI para un crash drum
-            ref_time_midi = time
-            return 49  
-        elif (11 < x < 51) and (17.5 < y < 22.5) and (-61 < z < -21):       # Nota MIDI para un ride drum
-            ref_time_midi = time
-            return 51  
-        elif (-27 < x < 3) and (14.5 < y < 19.5) and (-67 < z < -37):       # Nota MIDI para un hightom drum
-            ref_time_midi = time
-            return 50  
-        elif (17 < x < 47) and (47.5 < y < 52.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
-            ref_time_midi = time
-            return 45  
+    #print(f"acc midi: {acc_midi:.2f}")
+    if (acc_midi) > 0.25:
+        if time - ref_time_midi > 0.25:
+            if (-24 < x < 6) and (45 < y < 55) and (-26 < z < 4):           # Nota MIDI para un snare drum
+                ref_time_midi = time
+                return 38  
+            elif (-56 < x < -26) and (25 < y < 35) and (-24 < z < 6):       # Nota MIDI para un hihat drum
+                ref_time_midi = time
+                return 42  
+            elif (-53 < x < -13) and (-2.5 < y < 7.5) and (-56 < z < -16):           # Nota MIDI para un crash drum
+                ref_time_midi = time
+                return 49  
+            elif (11 < x < 51) and (15 < y < 25) and (-61 < z < -21):       # Nota MIDI para un ride drum
+                ref_time_midi = time
+                return 51  
+            elif (-27 < x < 3) and (12.0 < y < 22.0) and (-67 < z < -37):       # Nota MIDI para un hightom drum
+                ref_time_midi = time
+                return 50  
+            elif (17 < x < 47) and (45 < y < 55) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
+                ref_time_midi = time
+                return 45  
+        return None
     return None
 
 def corregir_mapa_profundidad(depth_frame, T, fx, fy, cx, cy):
@@ -321,6 +324,83 @@ def guardar_en_csv(nombre_archivo, dato1, dato2, dato3, dato4):
         escritor.writerow([dato1, dato2, dato3, dato4])
     # print(f"Datos guardados en {nombre_archivo}")
 
+def quaternion_from_matrix(M):
+    """
+    Convierte una matriz de rotación 3x3 en un cuaternión.
+    La convención del cuaternión es [qw, qx, qy, qz].
+    """
+    tr = M[0, 0] + M[1, 1] + M[2, 2]
+    if tr > 0:
+        S = math.sqrt(tr + 1.0) * 2  # S = 4 * qw
+        qw = 0.25 * S
+        qx = (M[2, 1] - M[1, 2]) / S
+        qy = (M[0, 2] - M[2, 0]) / S
+        qz = (M[1, 0] - M[0, 1]) / S
+    elif (M[0, 0] > M[1, 1]) and (M[0, 0] > M[2, 2]):
+        S = math.sqrt(1.0 + M[0, 0] - M[1, 1] - M[2, 2]) * 2  # S = 4 * qx
+        qw = (M[2, 1] - M[1, 2]) / S
+        qx = 0.25 * S
+        qy = (M[0, 1] + M[1, 0]) / S
+        qz = (M[0, 2] + M[2, 0]) / S
+    elif M[1, 1] > M[2, 2]:
+        S = math.sqrt(1.0 + M[1, 1] - M[0, 0] - M[2, 2]) * 2  # S = 4 * qy
+        qw = (M[0, 2] - M[2, 0]) / S
+        qx = (M[0, 1] + M[1, 0]) / S
+        qy = 0.25 * S
+        qz = (M[1, 2] + M[2, 1]) / S
+    else:
+        S = math.sqrt(1.0 + M[2, 2] - M[0, 0] - M[1, 1]) * 2  # S = 4 * qz
+        qw = (M[1, 0] - M[0, 1]) / S
+        qx = (M[0, 2] + M[2, 0]) / S
+        qy = (M[1, 2] + M[2, 1]) / S
+        qz = 0.25 * S
+    return np.array([qw, qx, qy, qz])
+
+def look_at(forward, up=np.array([0, 0, 1])):
+    """
+    Construye un cuaternión a partir de:
+      - forward: vector de dirección hacia donde se quiere orientar.
+      - up: vector que indica el "arriba" en el mundo.
+    Se calcula un sistema de ejes ortonormal en el que:
+      - f es el eje forward (dirección deseada),
+      - r es el eje right (perpendicular a forward y up),
+      - u es el eje up recalculado para garantizar ortogonalidad.
+    La matriz de rotación se construye como:
+         [ r_x   u_x   f_x ]
+         [ r_y   u_y   f_y ]
+         [ r_z   u_z   f_z ]
+    y se convierte a cuaternión.
+    """
+    # Normalizar el vector forward
+    norm_forward = np.linalg.norm(forward)
+    f = forward / norm_forward
+
+    # Verificar que el vector up no sea colineal con forward.
+    if abs(np.dot(f, up)) > 0.999:
+        # Si lo es, se elige otro vector up arbitrario.
+        up = np.array([0, 1, 0])
+
+    # Calcular el vector right (r = f x up)
+    r = np.cross(f, up)
+    norm_r = np.linalg.norm(r)
+    r /= norm_r
+
+    # Recalcular up para que sea ortonormal (u = r x f)
+    u = np.cross(r, f)
+
+    # Construir la matriz de rotación
+    # Nota: Esta matriz rota un vector del sistema local al sistema global.
+    M = np.array([
+        [r[0], u[0], f[0]],
+        [r[1], u[1], f[1]],
+        [r[2], u[2], f[2]]
+    ])
+
+    # Convertir la matriz a cuaternión
+    q = quaternion_from_matrix(M)
+    return q
+
+
 ##########################
 # 1. Hilo de captura (sensor)
 ##########################
@@ -331,14 +411,14 @@ def sensor_capture_thread():
         rwlock.acquire_read()
         try:
             if data_sync.get_state()['button']:
-                print("imu_data: ",imu_data[0])
+                #print("imu_data: ",imu_data)
                 _, _, _, ref_time, ref_but = visualizer.parse_sensor_data(imu_data[0], 0)
                 data_sync.set_button(ref_but)
                 data_sync.update_imu_time(ref_time)
             if not data_sync.get_state()['button']:
                 if data_sync.get_state()['offset_time_camera'] == 0:
                     data_sync.update_camera_time(time.time())
-                print("imu_data: ",imu_data[0])
+                #print("imu_data: ",imu_data)
                 acc, gyro, mag, ref_time, ref_but = visualizer.parse_sensor_data(imu_data[0], 0)
                 if ref_but == 0:
                     data_sync.set_button_repeat(True)
@@ -470,6 +550,7 @@ def kalman_update_thread():
     qy = 0
     qz = 0
     kalman_time = 0
+    
     Z_blue_buff = 0
     Z_red_buff = 0
     open("datos.csv", mode='w', newline='')
@@ -483,7 +564,7 @@ def kalman_update_thread():
             flag_no_more_imu = False
         except Empty:
             flag_imu_empty = True
-            # print("La cola sensor_queue está vacía.")
+            #print("La cola sensor_queue está vacía.")
         try:
             X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time = camara_queue.get(block=False)
             camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
@@ -520,43 +601,20 @@ def kalman_update_thread():
                 only_blue = False
                 time_only_blue = elapsed_time
 
-        # if ((Z_blue_buff + 500) < Z_blue) and not Z_blue_buff:
-        #     Z_blue = Z_blue_buff
-        #     Z_red = Z_red_buff
-        # else:
-        #     Z_blue_buff = Z_blue
-        #     Z_red_buff = Z_red
+            if ((Z_blue_buff + 500) < Z_blue) and Z_blue_buff:
+                Z_blue = Z_blue_buff
+                Z_red = Z_red_buff
+            else:
+                Z_blue_buff = Z_blue
+                Z_red_buff = Z_red
     ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
         if not flag_cam_empty and not only_blue:
             vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_red - Z_blue])
-            vector_ori = vector_ori/np.linalg.norm(vector_ori)
-
             u = np.array([0,0,1 ])
-            dot = np.dot(u, vector_ori)
-
-            # Caso especial: u y vector_ori son opuestos (rotación de 180°)
-            if dot < -0.999999:
-                # Elegimos un eje ortogonal arbitrario
-                orth = np.cross(np.array([0, 0, 1]), u)
-                if np.linalg.norm(orth) < 1e-6:
-                    orth = np.cross(np.array([0, 1, 0]), u)
-                orth = orth / np.linalg.norm(orth)
-                qw = 0
-                qx = orth[0]
-                qy = orth[1]
-                qz = orth[2]
-            else: 
-                axis = np.cross(u, vector_ori)
-                axis = axis / np.linalg.norm(axis) if np.linalg.norm(axis) != 0 else np.array([0, 0, 1])
-                # Calcular el ángulo
-                theta = math.acos(np.clip(dot, -1.0, 1.0))
-                # Calcular el cuaternión
-                s = math.sin(theta / 2)
-                qw = math.cos(theta / 2)
-                qx = axis[0] * s
-                qy = axis[1] * s
-                qz = axis[2] * s
-
+            
+            q = look_at(vector_ori,u)
+            q = q/np.linalg.norm(q)
+            print("q: ", q)
     ################################################# ACTUALIZAR FILTROS DE KALMAN     
         # print(f"Tiempo de la cámara: {camera_time:.0f} ms")
         # print(f"Tiempo del IMU: {imu_time:.0f} ms")
@@ -571,12 +629,12 @@ def kalman_update_thread():
                 u_ia_pos[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
                 u_ia_pos = u_ia_pos.reshape(3, 1)
 
-                u_ia_ori = np.array([qw,qx,qy,qz])
+                u_ia_ori = q
                 u_ia_ori = u_ia_ori.reshape(4, 1)
 
                 # print("u_ia_pos: ", u_ia_pos)
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-                print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                # print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
             else:    
                 visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
                 # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
@@ -599,18 +657,18 @@ def kalman_update_thread():
             u_ia_pos[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
             u_ia_pos = u_ia_pos.reshape(3, 1)
 
-            u_ia_ori = np.array([qw,qx,qy,qz])
+            u_ia_ori = q
             u_ia_ori = u_ia_ori.reshape(4, 1)
 
             # print("u_ia_pos: ", u_ia_pos)
             visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-            print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+            #print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
         
-
-        kalman_time = time.time()
-        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), kalman_time, float(visualizer.x_estimado[3]), float(visualizer.x_estimado[4]), float(visualizer.x_estimado[5]))
-        #print("acc: ", (np.linalg.norm(acc) - 1))
-        send_midi_note(midi_note, acc)
+        #print("Velocidad: ", float(visualizer.x_estimado[3]),float(visualizer.x_estimado[4]),float(visualizer.x_estimado[5]))
+        #print("u_ia_ori: ", u_ia_ori)
+        acc_midi = (np.linalg.norm(acc) - 1)
+        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), time.time(), acc_midi)
+        send_midi_note(midi_note, acc_midi)
         coords[0] = float(visualizer.x_estimado[0])
         coords[1] = float(visualizer.x_estimado[1])
         coords[2] = float(visualizer.x_estimado[2])

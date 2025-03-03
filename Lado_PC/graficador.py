@@ -28,7 +28,7 @@ def plot_instruments(ax):
     theta = np.linspace(0, 2 * np.pi, 100)
     despl_x = [-9, -11, 32, -41]        # Snare / High-tom / Low-tom / Hi-hat
     despl_z = [-11, -52, -12, -9]        # Snare / High-tom / Low-tom / Hi-hat
-    alturas = [60, 17, 50, 30]           # Snare / High-tom / Low-tom / Hi-hat
+    alturas = [50, 17, 50, 30]           # Snare / High-tom / Low-tom / Hi-hat
     for y, z, x in zip(alturas, despl_z, despl_x):
         x_circ = radio * np.cos(theta) + x
         z_circ = radio * np.sin(theta) + z

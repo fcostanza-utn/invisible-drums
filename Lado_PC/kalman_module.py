@@ -397,9 +397,12 @@ class IMUVisualizer:
         self.Q = self.ekf.update(self.Q_buff, self.gyro, self.acc, self.mag, self.dt)
         self.Q_buff = self.Q
 ################################################################## Kalman de Orientación Fusión
+        #print("Q: ", self.Q)
         if not (np.all(self.u_ia_ori == 0)):
             self.ori_fus_kf()
 ################################################################## Kalman de Posición Sensor y Fusión
+        #print("u_ia_ori: ", self.u_ia_ori)
+        #print("Q corregido: ", self.Q)
         self.x_estimado = self.posicion_fus_kf()                                            
 
     def run(self):

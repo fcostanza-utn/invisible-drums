@@ -16,9 +16,9 @@ SHM_NAME = 'esp_shared'
 
 # Se crea la memoria compartida para 3 valores de tipo double.
 # El tamaño se calcula como 3 * tamaño de un double.
-shm_esp = shared_memory.SharedMemory(create=True, name=SHM_NAME, size=1 * np.dtype('U100').itemsize)
+shm_esp = shared_memory.SharedMemory(create=True, name=SHM_NAME, size=1 * np.dtype('U120').itemsize)
 # Creamos un array numpy que utiliza el buffer de la memoria compartida.
-imu_data = np.ndarray((1,), dtype='U100', buffer=shm_esp.buf)
+imu_data = np.ndarray((1,), dtype='U120', buffer=shm_esp.buf)
 
 # Mantenemos el hilo principal vivo (por ejemplo, con un bucle infinito o esperando a que terminen los hilos)
 try:
@@ -27,8 +27,9 @@ try:
         try:
             data = visualizer.receive_data()  # Leer IMU
             if data:
-                imu_data[...] = data
-                print("data: ", data)
+                imu_data [...] = data
+                print("imu_data: ", imu_data)
+                print("imu_data_size: ",sys.getsizeof(imu_data))
         finally:
             rwlock.release_write()
         time.sleep(0.005)

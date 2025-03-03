@@ -130,6 +130,9 @@ void loop() {
         report += ",";
         report += String(milliseconds);
         int estado = digitalRead(PIN_GPIO);  // Leer el estado del pin
+        if(estado == 0){
+          mpu.calcOffsets(true, true);
+        }
         report += ",";
         report += String(estado);
         
