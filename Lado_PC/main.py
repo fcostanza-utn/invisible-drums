@@ -114,7 +114,6 @@ imu_data = np.ndarray((1,), dtype='U120', buffer=shm_esp.buf)
 INICIALIZACION DE YOLO y Midas
 """
 # modelo YOLO
-# modelo YOLO
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_yolo = YOLO("yolo-Weights/best_yolo11m_v3Kinect.pt").to(device)
 classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
@@ -400,6 +399,23 @@ def look_at(forward, up=np.array([0, 0, 1])):
     q = quaternion_from_matrix(M)
     return q
 
+def centim_a_pixel(X, Y, Z, mtx):
+    x_mm = X * 10                   # Se contempla que X se pasó en centimetros
+    y_mm = Y * 10                   # Se contempla que Y se pasó en centimetros
+    z_mm = Z * 10                   # Se contempla que Z se pasó en centimetros
+    fx = mtx[0,0]
+    fy = mtx[1,1]
+    cx = mtx[0,1]
+    cy = mtx[1,2]
+    state = data_sync.get_state()
+    x_offset = state['x_offset']    # Se contempla que se encuentra guardado en pixeles
+    y_offset = state['y_offset']    # Se contempla que se encuentra guardado en pixeles
+    z_offset = state['z_offset']    # Se contempla que se encuentra guardado en milimetros
+
+    X_px = (((x_mm * fx) + (z_offset * (x_offset - cx)))/(z_offset + z_mm)) + cx
+    Y_px = (((y_mm * fy) + (z_offset * (y_offset - cy)))/(z_offset + z_mm)) + cy
+
+    return X_px, Y_px
 
 ##########################
 # 1. Hilo de captura (sensor)
@@ -616,10 +632,8 @@ def kalman_update_thread():
             q = q/np.linalg.norm(q)
             print("q: ", q)
     ################################################# ACTUALIZAR FILTROS DE KALMAN     
-        # print(f"Tiempo de la cámara: {camera_time:.0f} ms")
-        # print(f"Tiempo del IMU: {imu_time:.0f} ms")
+        state = data_sync.get_state()
         if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty:
-            state = data_sync.get_state()
             if not flag_cam_empty:
                 if X_blue and Y_blue and not Z_blue:
                     Z_blue = u_ia_pos[2] * 1000 + state['z_offset']
@@ -680,8 +694,6 @@ def kalman_update_thread():
         # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
         time.sleep(0.01)  # 10ms entre muestras
 
-with open("detections.txt", "w") as file:
-    file.write("Clase, Coordenada_X, Coordenada_Y, Profundidad\n")  # Encabezado del archivo
 
 ##########################
 # Lanzamos los hilos

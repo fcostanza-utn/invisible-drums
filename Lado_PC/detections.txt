@@ -1,1 +1,0 @@
-Clase, Coordenada_X, Coordenada_Y, Profundidad
