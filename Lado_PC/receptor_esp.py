@@ -21,9 +21,9 @@ SHM_NAME = 'esp_shared'
 
 # Se crea la memoria compartida para 3 valores de tipo double.
 # El tamaño se calcula como 3 * tamaño de un double.
-shm_esp = shared_memory.SharedMemory(create=True, name=SHM_NAME, size=1 * np.dtype('U120').itemsize)
+shm_esp = shared_memory.SharedMemory(create=True, name=SHM_NAME, size=1 * np.dtype('U160').itemsize)
 # Creamos un array numpy que utiliza el buffer de la memoria compartida.
-imu_data = np.ndarray((1,), dtype='U120', buffer=shm_esp.buf)
+imu_data = np.ndarray((1,), dtype='U160', buffer=shm_esp.buf)
 
 """
 FUNCIONES

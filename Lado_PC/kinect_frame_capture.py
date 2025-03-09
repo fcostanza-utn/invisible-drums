@@ -30,7 +30,7 @@ def main():
     if not os.path.exists(dataset_dir):
         os.makedirs(dataset_dir)
 
-    frame_count = 3128
+    frame_count = 3250
     print("Capturando frames. Presiona 'q' en la ventana de imagen para salir.")
 
     while True:

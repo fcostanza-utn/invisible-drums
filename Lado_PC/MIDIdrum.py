@@ -1,5 +1,6 @@
 import mido
 import pygame
+import time
 
 # Inicializa Pygame
 pygame.init()
@@ -35,7 +36,7 @@ with mido.open_input('MIDI1 0') as port:
         for msg in port:
             # Solo procesa mensajes de nota on
             if msg.type == 'note_on' and msg.velocity > 0:
-                print(f"Received note: {msg.note} VELOCITY: {msg.velocity}")
+                print(f"Received note: {msg.note} VELOCITY: {msg.velocity} time: {time.time()}")
                 play_drum(msg.note, float(msg.velocity/100))
             elif msg.type == 'note_off':
                 print(f"Received note off: {msg.note}")

@@ -72,10 +72,9 @@ Rot_matrix_stereo = np.array([[9.9997269257755e-01,     6.7448757651869e-03,    
                               [-6.7584186667168e-03,    9.9996705075785e-01,    -4.4967961679709e-03],
                               [2.9896281242425e-03,     4.5170841881792e-03,    9.9998532892944e-01]])
 
-contador_imu = 0
-
 # Nombre que se usará para identificar la memoria compartida del graficador.
-SHM_NAME_GRAF = 'coords_shared'
+SHM_NAME_GRAF_RIGHT = 'coords_shared_right'
+SHM_NAME_GRAF_LEFT = 'coords_shared_left'
 # Nombre que se usará para identificar la memoria compartida del esp.
 SHM_NAME_ESP = 'esp_shared'
 
@@ -85,23 +84,26 @@ x_data = deque(maxlen=num_muestras)
 y_data = deque(maxlen=num_muestras)
 z_data = deque(maxlen=num_muestras)
 t_data = deque(maxlen=num_muestras)  # Contador de muestras (eje X)
-t_data = deque(maxlen=num_muestras)  # Contador de muestras (eje X)
 
 """
 Colas de Datos
 """
 sensor_queue = Queue(maxsize=100)   # Para datos crudos de la IMU
 camara_queue = Queue(maxsize=100)   # Para datos crudos de la cámara
-graf_queue = Queue(maxsize=100)   # Para datos crudos para graficar
 
 """
 Memoria compartida
 """
 # Se crea la memoria compartida para 3 valores de tipo double.
-# El tamaño se calcula como 3 * tamaño de un double.
-shm_graf = shared_memory.SharedMemory(create=True, name=SHM_NAME_GRAF, size=3 * np.dtype('d').itemsize)
+# Shared memory del palillo derecho
+shm_graf_r = shared_memory.SharedMemory(create=True, name=SHM_NAME_GRAF_RIGHT, size=3 * np.dtype('d').itemsize)
 # Creamos un array numpy que utiliza el buffer de la memoria compartida.
-coords = np.ndarray((3,), dtype='d', buffer=shm_graf.buf)
+coords_right = np.ndarray((3,), dtype='d', buffer=shm_graf_r.buf)
+
+# Shared memory del palillo izquierdo
+shm_graf_l = shared_memory.SharedMemory(create=True, name=SHM_NAME_GRAF_LEFT, size=3 * np.dtype('d').itemsize)
+# Creamos un array numpy que utiliza el buffer de la memoria compartida.
+coords_left = np.ndarray((3,), dtype='d', buffer=shm_graf_l.buf)
 
 # Intentamos conectar con la memoria compartida ya creada
 try:
@@ -109,14 +111,16 @@ try:
 except FileNotFoundError:
     print(f"No se encontró la memoria compartida con nombre '{SHM_NAME_ESP}'. Asegúrate de que el productor la haya creado.")
     exit(1)
-imu_data = np.ndarray((1,), dtype='U120', buffer=shm_esp.buf)
+imu_data = np.ndarray((1,), dtype='U160', buffer=shm_esp.buf)
 """
 INICIALIZACION DE YOLO y Midas
 """
 # modelo YOLO
+# modelo YOLO
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model_yolo = YOLO("yolo-Weights/best_yolo11m_v3Kinect.pt").to(device)
-classNames = ["drumsticks_mid", "drumsticks_tip"] # Definir las clases de objetos para la detección
+model_yolo = YOLO("yolo-Weights/best_yolo11m_v4Kinect.pt").to(device)
+#classNames = ["drumsticks_mid_R", "drumsticks_tip_R", "drumsticks_mid_L", "drumsticks_tip_L"] # Definir las clases de objetos para la detección
+classNames = ['3.', 'drumsticks_mid_L', 'drumsticks_mid_R', 'drumsticks_tip_L', 'drumsticks_tip_R']
 
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 
@@ -145,7 +149,8 @@ color_stream.start()
 """
 INICIALIZACION DE IMU
 """
-visualizer = IMUVisualizer(dt=0.02)
+right_kalman  = IMUVisualizer(dt=0.021)
+left_kalman  = IMUVisualizer(dt=0.021)
 """
 INICIALIZACION DE MIDI
 """
@@ -285,14 +290,20 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
     disparidad = 50
     Xp_min = max(Xp - disparidad, 0)
     Xp_max = min(Xp + disparidad, depth_frame.shape[1])  # Asegurar que no exceda las columnas
+
+    # Yp_min = max(Yp - 10, 0)
+    # Yp_max = min(Yp + 10, depth_frame.shape[0])  # Asegurar que no exceda las columnas
     # Extraer valores dentro de los límites
     z_value = depth_frame[Yp, Xp_min:Xp_max]
     z_value = z_value[z_value != 0]
+    X_match = 0
+    Y_match = 0
+    z_value_min = 0
 
     if z_value.size > 0:
         # Obtener el valor mínimo y convertirlo a entero
         z_value_min = int(np.min(z_value))
-        return z_value_min
+        #return z_value_min
     else:
         disparidad = 100
         Xp_min = max(Xp - disparidad, 0)
@@ -303,7 +314,7 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
         if z_value.size > 0:
             # Obtener el valor mínimo y convertirlo a entero
             z_value_min = int(np.min(z_value))
-            return z_value_min
+            #return z_value_min
         else:
             disparidad = 125
             Xp_min = max(Xp - disparidad, 0)
@@ -314,8 +325,14 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
             if z_value.size > 0:
                 # Obtener el valor mínimo y convertirlo a entero
                 z_value_min = int(np.min(z_value))
-                return z_value_min
-    return 0
+                #return z_value_min
+            print("Z value caso 3: ", z_value_min)
+    for x in range(Xp_min, Xp_max):
+        # for y in range(Yp_min, Yp_max):
+        if depth_frame[Yp, x] == z_value_min: 
+            X_match=x
+                # Y_match=y
+    return {'z_value_min': z_value_min, 'xy':(X_match,Yp)}
 
 def guardar_en_csv(nombre_archivo, dato1, dato2, dato3, dato4):
     with open(nombre_archivo, mode='a', newline='') as archivo:
@@ -421,33 +438,46 @@ def centim_a_pixel(X, Y, Z, mtx):
 # 1. Hilo de captura (sensor)
 ##########################
 def sensor_capture_thread():
-    global contador_imu
     while not stop_event.is_set():
         start_time = time.time()
         rwlock.acquire_read()
         try:
-            if data_sync.get_state()['button']:
-                #print("imu_data: ",imu_data)
-                _, _, _, ref_time, ref_but = visualizer.parse_sensor_data(imu_data[0], 0)
-                data_sync.set_button(ref_but)
-                data_sync.update_imu_time(ref_time)
-            if not data_sync.get_state()['button']:
+            if data_sync.get_state()['button_right'] and data_sync.get_state()['button_left']:
+                esp_data = right_kalman.parse_sensor_data(imu_data[0], 0)
+                data_sync.set_master(esp_data['pal_indic'])
+                data_sync.set_button(esp_data['boton_1'], 'right')
+                data_sync.set_button(esp_data['boton_2'], 'left')
+                data_sync.update_imu_time(esp_data['timestamp'])
+            elif not data_sync.get_state()['button_right'] or not data_sync.get_state()['button_left']:
                 if data_sync.get_state()['offset_time_camera'] == 0:
                     data_sync.update_camera_time(time.time())
-                #print("imu_data: ",imu_data)
-                acc, gyro, mag, ref_time, ref_but = visualizer.parse_sensor_data(imu_data[0], 0)
-                if ref_but == 0:
-                    data_sync.set_button_repeat(True)
-                    data_sync.update_camera_time(time.time())
-                    data_sync.update_imu_time(ref_time)
-                    ref_but = 1
-                sensor_queue.put((acc, gyro, mag, ref_time))
-                end_time = time.time()
-                # print(f"Tiempo de procesamiento captura: {end_time - start_time:.5f} segundos")
-                contador_imu += 1
+                esp_data = right_kalman.parse_sensor_data(imu_data[0], 0)
+                if esp_data != None:
+                    if esp_data.get('boton_1') == 0:
+                        data_sync.set_master(esp_data['pal_indic'])
+                        data_sync.set_button_repeat(True, 'right')
+                        data_sync.update_camera_time(time.time())
+                        data_sync.update_imu_time(esp_data['timestamp'])
+                    if esp_data.get('boton_2') == 0:
+                        data_sync.set_master(esp_data['pal_indic'])
+                        data_sync.set_button_repeat(True, 'left')
+                        data_sync.update_camera_time(time.time())
+                        data_sync.update_imu_time(esp_data['timestamp'])
+
+                    if esp_data['acc_2'] != None:
+                        sensor_queue.put((esp_data['acc_1'], esp_data['gyro_1'], esp_data['mag_1'], esp_data['acc_2'], esp_data['gyro_2'], esp_data['mag_2'], esp_data['timestamp']))
+                    elif esp_data['acc_2'] == None:
+                        sensor_queue.put((esp_data['acc_1'], esp_data['gyro_1'], esp_data['mag_1'], esp_data['pal_indic'] , esp_data['timestamp']))
+                    else:
+                        pass
+                else:
+                    pass
         finally:
             rwlock.release_read()
+        end_time = time.time()
+        #print(f"Tiempo de procesamiento hilo muestreo: {end_time - start_time:.3f} segundos")
         time.sleep(0.005)  # 5ms entre muestras
+    #print("Terminando hilo de muestreo...")
 
     
 ##########################
@@ -456,90 +486,130 @@ def sensor_capture_thread():
 def image_processing_thread():
     while not stop_event.is_set():
         start_time = time.time()
-
         color_frame = color_stream.read_frame()
         depth_frame = depth_stream.read_frame()
         color_data = np.array(color_frame.get_buffer_as_triplet()).reshape((color_frame.height, color_frame.width, 3))    
         color_data = cv2.cvtColor(color_data, cv2.COLOR_RGB2BGR)
+
+        depth_buff = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
+        mask = (depth_buff == 0).astype(np.uint8) * 255
+        depth_corregido = cv2.inpaint(depth_buff, mask, 5, cv2.INPAINT_TELEA)
+        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        # depth_corregido = cv2.morphologyEx(depth_buff, cv2.MORPH_CLOSE, kernel)
         depth_corregido = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
+
+        X_blue = 0
+        Y_blue = 0
+        Z_blue = 0
+        X_green = 0
+        Y_green = 0
+        Z_green = 0
 
         if color_data is not None:
             elapsed_time = time.time()
-            results = model_yolo.predict(color_data, conf=0.25, stream=True)
+            results = model_yolo.predict(color_data, conf=0.20, stream=True)
             points = {}
 
             for r in results:
-                # depth_corregido = corregir_mapa_profundidad(depth_data, T_prof, mtx_prof[0,0], mtx_prof[1,1], mtx_prof[0,2], mtx_prof[1,2])
-                tip_detected = False
-                mid_detected = False
+                right_tip_detected = False
+                right_mid_detected = False
+                left_tip_detected = False
+                left_mid_detected = False
                 for box in r.boxes:
                     push = False
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2
-                    # z_value = int(depth_corregido[Yp, Xp])
-                    z_value = aprox_depth_disp(depth_corregido, Xp, Yp)
-
-                    # XY_stereo = np.dot(Rot_matrix_stereo, np.array([[Xp], [Yp], [z_value]])) + tras_vector_stereo
-                    # if int(XY_stereo[1,0]) > 480:
-                    #     XY_stereo[1,0] = 480
-                    # if int(XY_stereo[0,0]) > 640:
-                    #     XY_stereo[0,0] = 640
-                    # # z_value = int(depth_corregido[int(XY_stereo[1,0]), int(XY_stereo[0,0])])
-                    # z_value = aprox_depth_disp(depth_corregido, XY_stereo[0,0], XY_stereo[1,0])
+                    z_value_dict = aprox_depth_disp(depth_corregido, Xp, Yp)
+                    z_value = z_value_dict.get('z_value_min')
+                    X_Z     = z_value_dict.get('xy')[0]
+                    Y_Z     = z_value_dict.get('xy')[1]
+                    
 
                     confidence = math.ceil((box.conf[0] * 100)) / 100
                     cls = int(box.cls[0])
                     class_name = classNames[cls]
 
-                    if class_name == "drumsticks_tip" and tip_detected == False:
+                    if class_name == "drumsticks_tip_R" and right_tip_detected == False:
                         push = True
-                        tip_detected = True
-                    
-                    if class_name == "drumsticks_mid" and mid_detected == False:
+                        right_tip_detected = True
+                    if class_name == "drumsticks_mid_R" and right_mid_detected == False:
                         push = True
-                        mid_detected = True
-                    
+                        right_mid_detected = True
+                    if class_name == "drumsticks_tip_L" and left_tip_detected == False:
+                        push = True
+                        left_tip_detected = True                    
+                    if class_name == "drumsticks_mid_L" and left_mid_detected == False:
+                        push = True
+                        left_mid_detected = True
                     if push:
                         cv2.rectangle(color_data, (x1, y1), (x2, y2), (255, 0, 255), 3)
-                        cv2.putText(color_data, f"{class_name} {confidence} Coord:({Xp},{Yp},{z_value})",
-                                    (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                        cv2.putText(color_data, f"z_value:({z_value})",
+                                    (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 2)
                         points[class_name] = (Xp, Yp, z_value)
+                        # cv2.putText(depth_corregido, f"delta px X:({Xp-X_Z}) Y: ({Yp-Y_Z})",
+                        #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                        # cv2.line(depth_corregido, (Xp, Yp), (X_Z, Y_Z), (0, 255, 0), 2)
 
-            # Dibujar línea entre drumsticks_mid y drumsticks_tip
-            if "drumsticks_mid" in points and "drumsticks_tip" in points:
-                if np.linalg.norm(np.array(points["drumsticks_mid"][:2]) - np.array(points["drumsticks_tip"][:2])) < 250:
-                    cv2.line(color_data, points["drumsticks_mid"][:2], points["drumsticks_tip"][:2], (0, 255, 0), 2)
-                    (X_blue, Y_blue, Z_blue) = points["drumsticks_tip"]
-                    (X_red, Y_red, Z_red) = points["drumsticks_mid"]
-                    if data_sync.get_state()['button']:
-                        data_sync.set_offsets(X_blue, Y_blue, Z_blue)
-                    if data_sync.get_state()['button_repeat']:
-                        data_sync.set_offsets(X_blue, Y_blue, Z_blue)
-                        data_sync.set_button_repeat(False)  
-                    if not data_sync.get_state()['button']:
-                        camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time))
-            elif "drumsticks_tip" in points:
-                (X_blue, Y_blue, Z_blue) = points["drumsticks_tip"]
-                if data_sync.get_state()['button']:
-                    data_sync.set_offsets(X_blue, Y_blue, Z_blue)
-                if data_sync.get_state()['button_repeat']:
-                    data_sync.set_offsets(X_blue, Y_blue, Z_blue)
-                    data_sync.set_button_repeat(False)  
-                if not data_sync.get_state()['button']:
-                    camara_queue.put((X_blue, Y_blue, Z_blue, 1000, 1000, 1000, elapsed_time))
+            if right_tip_detected:
+                (X_blue, Y_blue, Z_blue) = points["drumsticks_tip_R"]
+            if right_mid_detected:
+                (X_red, Y_red, Z_red) = points["drumsticks_mid_R"]
+            if left_tip_detected:
+                (X_green, Y_green, Z_green) = points["drumsticks_tip_L"]
+            if left_mid_detected:
+                (X_yellow, Y_yellow, Z_yellow) = points["drumsticks_mid_L"]       
 
+            if right_tip_detected or left_tip_detected:
+                if ((data_sync.get_state()['button_right'] and data_sync.get_state()['button_left']) or (data_sync.get_state()['button_repeat_right'] or data_sync.get_state()['button_repeat_left'])) and (data_sync.get_state()['master'] == 3 or data_sync.get_state()['master'] == 1):
+                    print("Seteando offsets posicion: ", X_blue, Y_blue, Z_blue)
+                    data_sync.set_offsets(X_blue, Y_blue, Z_blue, 1000, 1000, 1000)
+                    data_sync.set_button_repeat(False, 'right')
+                    data_sync.set_button_repeat(False, 'left')
+                if ((data_sync.get_state()['button_right'] and data_sync.get_state()['button_left']) or (data_sync.get_state()['button_repeat_right'] or data_sync.get_state()['button_repeat_left'])) and (data_sync.get_state()['master'] == 4 or data_sync.get_state()['master'] == 2):
+                    data_sync.set_offsets(1000, 1000, 1000, X_green, Y_green, Z_green)
+                    data_sync.set_button_repeat(False, 'right')
+                    data_sync.set_button_repeat(False, 'left')
+
+            if right_tip_detected and right_mid_detected:
+                if np.linalg.norm(np.array(points["drumsticks_mid_R"][:2]) - np.array(points["drumsticks_tip_R"][:2])) < 250:
+                    cv2.line(color_data, points["drumsticks_mid_R"][:2], points["drumsticks_tip_R"][:2], (0, 255, 0), 2)
+
+            if left_tip_detected and left_mid_detected:
+                if np.linalg.norm(np.array(points["drumsticks_mid_L"][:2]) - np.array(points["drumsticks_tip_L"][:2])) < 250:
+                    cv2.line(color_data, points["drumsticks_mid_L"][:2], points["drumsticks_tip_L"][:2], (0, 255, 0), 2)
+
+            if not data_sync.get_state()['button_right'] or not data_sync.get_state()['button_left']:
+                if right_tip_detected and right_mid_detected and left_tip_detected and left_mid_detected:
+                    camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, X_green, Y_green, Z_green, X_yellow, Y_yellow, Z_yellow, elapsed_time))
+                elif right_tip_detected and right_mid_detected and left_tip_detected:
+                    camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, X_green, Y_green, Z_green, 1000, 1000, 1000, elapsed_time))
+                elif right_tip_detected and left_tip_detected and left_mid_detected:
+                    camara_queue.put((X_blue, Y_blue, Z_blue, 1000, 1000, 1000, X_green, Y_green, Z_green, X_yellow, Y_yellow, Z_yellow, elapsed_time))
+                elif right_tip_detected and left_tip_detected:
+                    camara_queue.put((X_blue, Y_blue, Z_blue, 1000, 1000, 1000, X_green, Y_green, Z_green, 1000, 1000, 1000, elapsed_time))
+                elif right_tip_detected and right_mid_detected:
+                    camara_queue.put((X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, 1000, 1000, 1000, 1000, 1000, 1000, elapsed_time))
+                elif left_tip_detected and left_mid_detected:
+                    camara_queue.put((1000, 1000, 1000, 1000, 1000, 1000, X_green, Y_green, Z_green, X_yellow, Y_yellow, Z_yellow, elapsed_time))
+                elif right_tip_detected:
+                    camara_queue.put((X_blue, Y_blue, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, elapsed_time))
+                elif left_tip_detected:
+                    camara_queue.put((1000, 1000, 1000, 1000, 1000, 1000, X_green, Y_green, Z_green, 1000, 1000, 1000, elapsed_time))
+                        
+            
             cv2.imshow("Cam", color_data)
             cv2.imshow("Depth", depth_corregido)
 
-        end_time = time.time()
-        # print(f"Tiempo de procesamiento camara: {end_time - start_time:.3f} segundos")
         if cv2.waitKey(1) == ord('q'):
             stop_event.set()  # Señalizamos al hilo 1 que debe detenerse
             break
-        time.sleep(0.005)  # 5ms entre muestras
-    
-    shm_graf.close()
-    shm_graf.unlink()  
+        end_time = time.time()
+        #print(f"Tiempo de procesamiento hilo imagen: {end_time - start_time:.3f} segundos")
+        
+    shm_graf_r.close()
+    shm_graf_r.unlink()  
+    shm_graf_l.close()
+    shm_graf_l.unlink()  
     shm_esp.close() 
     openni2.unload()
     cv2.destroyAllWindows()
@@ -549,40 +619,70 @@ def image_processing_thread():
 ##########################
 def kalman_update_thread():
     global contador_imu
+
     flag_imu_empty = False
     flag_cam_empty = False
     flag_no_more_cam = False
     flag_no_more_imu = False
+
     camera_time = 0
     imu_time = 0
-    u_ia_pos = np.zeros((3, 1))
-    u_ia_ori = np.zeros((4, 1))
-    acc = np.zeros((3, 1))
-    note = None
+
+    u_ia_pos_right = np.zeros((3, 1))
+    u_ia_pos_left = np.zeros((3, 1))
+    u_ia_ori_right = np.zeros((4, 1))
+    u_ia_ori_left = np.zeros((4, 1))
+    acc_l = np.zeros((3, 1))
+    acc_r = np.zeros((3, 1))
+    gyro_r = np.zeros((3, 1))
+    gyro_l = np.zeros((3, 1))
+    mag_r = np.zeros((3, 1))
+    mag_l = np.zeros((3, 1))
+
     only_blue = False
+    only_green = False
     time_only_blue = 0
-    qw = 0
-    qx = 0
-    qy = 0
-    qz = 0
-    kalman_time = 0
+    time_only_green = 0
     
+    right_drum_on = True
+    left_drum_on = True
+
+    Z_blue = 0
     Z_blue_buff = 0
     Z_red_buff = 0
-    open("datos.csv", mode='w', newline='')
+    Z_green_buff = 0
+    Z_yellow_buff = 0
+
+    pal_indic = 0
+
+    q_r = np.zeros((4, 1))
+    q_l = np.zeros((4, 1))
 
     while not stop_event.is_set():
         start_time = time.time()
         try:
-            acc, gyro, mag, milisegundos = sensor_queue.get(block=False)
+            msg = sensor_queue.get(block=False)
+            if len(msg) == 7:
+                acc_r, gyro_r, mag_r, acc_l, gyro_l, mag_l, milisegundos = msg
+                pal_indic = 5
+            if len(msg) == 5:
+                acc_1, gyro_1, mag_1, pal_indic, milisegundos = msg
+                if pal_indic == 3:
+                    acc_r = acc_1
+                    gyro_r = gyro_1
+                    mag_r = mag_1
+                if pal_indic == 4:
+                    acc_l = acc_1
+                    gyro_l = gyro_1
+                    mag_l = mag_1
             imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
             flag_imu_empty = False
             flag_no_more_imu = False
         except Empty:
             flag_imu_empty = True
-            #print("La cola sensor_queue está vacía.")
+            # print("La cola sensor_queue está vacía.")
         try:
-            X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time = camara_queue.get(block=False)
+            X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, X_green, Y_green, Z_green, X_yellow, Y_yellow, Z_yellow, elapsed_time = camara_queue.get(block=False)
             camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
             flag_cam_empty = False
             flag_no_more_cam = False
@@ -592,14 +692,28 @@ def kalman_update_thread():
 
         while (camera_time > imu_time) and  not flag_no_more_imu:
             try:
-                acc, gyro, mag, milisegundos = sensor_queue.get(block=False)
+                msg = sensor_queue.get(block=False)
+                if len(msg) == 7:
+                    acc_r, gyro_r, mag_r, acc_l, gyro_l, mag_l, milisegundos = msg
+                    pal_indic = 5
+                if len(msg) == 5:
+                    acc_1, gyro_1, mag_1, pal_indic, milisegundos = msg
+                    #print("pal_indic: ", pal_indic)
+                    if pal_indic == 1:
+                        acc_r = acc_1
+                        gyro_r = gyro_1
+                        mag_r = mag_1
+                    if pal_indic == 2:
+                        acc_l = acc_1
+                        gyro_l = gyro_1
+                        mag_l = mag_1
                 imu_time = milisegundos - data_sync.get_state()['offset_time_imu']
             except Empty:
-                flag_no_more_imu = True  
+                flag_no_more_imu = True
 
         while (((camera_time < imu_time - 50) or (camera_time > imu_time + 50))) and not flag_no_more_cam:
             try:
-                X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, elapsed_time = camara_queue.get(block=False)
+                X_blue, Y_blue, Z_blue, X_red, Y_red, Z_red, X_green, Y_green, Z_green, X_yellow, Y_yellow, Z_yellow, elapsed_time = camara_queue.get(block=False)
                 camera_time = (elapsed_time - data_sync.get_state()['offset_time_camera'])*1000
             except Empty:
                 flag_no_more_cam = True
@@ -617,83 +731,157 @@ def kalman_update_thread():
                 only_blue = False
                 time_only_blue = elapsed_time
 
-            if ((Z_blue_buff + 500) < Z_blue) and Z_blue_buff:
+            if X_yellow == 1000 and Y_yellow == 1000 and Z_yellow == 1000:
+                if time_only_green == 0:
+                    only_green = True
+                    time_only_green = elapsed_time
+                elif (elapsed_time - time_only_green) < 100:
+                    only_green = True
+                else:
+                    only_green = False
+            else:
+                only_green = False
+                time_only_green = elapsed_time
+            
+            if X_blue == 1000 and Y_blue == 1000 and Z_blue == 1000:
+                right_drum_on = False
+            else:
+                right_drum_on = True
+                time_ref_right = camera_time
+            if X_green == 1000 and Y_green == 1000 and Z_green == 1000:
+                left_drum_on = False
+            else:
+                left_drum_on = True
+                time_ref_left = camera_time
+
+            if ((Z_blue_buff + 500) < Z_blue) and Z_blue_buff and right_drum_on and not only_blue:
                 Z_blue = Z_blue_buff
                 Z_red = Z_red_buff
             else:
                 Z_blue_buff = Z_blue
                 Z_red_buff = Z_red
+
+            if ((Z_green_buff + 500) < Z_blue) and Z_green_buff and left_drum_on and not only_green:
+                Z_green = Z_green_buff
+                Z_yellow = Z_yellow_buff
+            else:
+                Z_green_buff = Z_green
+                Z_yellow_buff = Z_yellow
+
     ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
         if not flag_cam_empty and not only_blue:
-            vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_red - Z_blue])
+            vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_blue - Z_red])
             u = np.array([0,0,1 ])
             
-            q = look_at(vector_ori,u)
-            q = q/np.linalg.norm(q)
-            print("q: ", q)
+            q_r = look_at(vector_ori,u)
+            q_r = q_r/np.linalg.norm(q_r)
+        if not flag_cam_empty and not only_green:
+            vector_ori = np.array([X_green - X_yellow, Y_green - Y_yellow, Z_green - Z_yellow])
+            u = np.array([0,0,1 ])
+            
+            q_l = look_at(vector_ori,u)
+            q_l = q_l/np.linalg.norm(q_l)
     ################################################# ACTUALIZAR FILTROS DE KALMAN     
         state = data_sync.get_state()
-        if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty:
+        
+        if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty and (pal_indic == 5 or pal_indic == 3):
             if not flag_cam_empty:
                 if X_blue and Y_blue and not Z_blue:
-                    Z_blue = u_ia_pos[2] * 1000 + state['z_offset']
+                    Z_blue = u_ia_pos_right[2] * 1000 + state['z_offset']
                 else:
-                    u_ia_pos[2] = (Z_blue - state['z_offset']) / 1000
-                u_ia_pos[0] = (((X_blue - mtx_rgb[0,2]) * Z_blue - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
-                u_ia_pos[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
-                u_ia_pos = u_ia_pos.reshape(3, 1)
+                    u_ia_pos_right[2] = (Z_blue - state['z_offset']) / 1000
+                u_ia_pos_right[0] = (((X_blue - mtx_rgb[0,2]) * Z_blue - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
+                u_ia_pos_right[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
+                u_ia_pos_right = u_ia_pos_right.reshape(3, 1)
 
-                u_ia_ori = q
-                u_ia_ori = u_ia_ori.reshape(4, 1)
+                u_ia_ori_right = q_r
+                u_ia_ori_right = u_ia_ori_right.reshape(4, 1)
 
-                # print("u_ia_pos: ", u_ia_pos)
-                visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-                # print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                right_kalman.update_kf(u_ia_ori = u_ia_ori_right, u_ia_pos = u_ia_pos_right, gyro = gyro_r, mag = mag_r, acc = acc_r)
+
             else:    
-                visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-                # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
+                right_kalman.update_kf(u_ia_ori = u_ia_ori_right, u_ia_pos = u_ia_pos_right, gyro = gyro_r, mag = mag_r, acc = acc_r)
+            print(f"Right Kalman both: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
 
-            # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
-
-        elif not flag_imu_empty:
-            visualizer.update_kf(gyro = gyro, mag = mag, acc = acc)
-
-            # graf_queue.put((visualizer.x_estimado[0], visualizer.x_estimado[1], visualizer.x_estimado[2]))
-
-            # print(f"Posicion s/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
-        
-        elif not flag_cam_empty:
+        elif not flag_imu_empty and (pal_indic == 5 or pal_indic == 3):
+            right_kalman.update_kf(gyro = gyro_r, mag = mag_r, acc = acc_r)
+            # print(f"Right Kalman only imu: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
+            # print("Imu time: ", imu_time)
+            # print("Camera_time : ", camera_time)
+            # print("milisegundos imu : ", milisegundos)
+            print("offset_time_imu : ", data_sync.get_state()['offset_time_imu'])
+                    
+        elif not flag_cam_empty and right_drum_on:
             if X_blue and Y_blue and not Z_blue:
-                Z_blue = u_ia_pos[2] * 1000 + state['z_offset']
+                Z_blue = u_ia_pos_right[2] * 1000 + state['z_offset']
             else:
-                u_ia_pos[2] = (Z_blue - state['z_offset']) / 1000
-            u_ia_pos[0] = (((X_blue - mtx_rgb[0,2]) * Z_blue - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
-            u_ia_pos[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
-            u_ia_pos = u_ia_pos.reshape(3, 1)
+                u_ia_pos_right[2] = (Z_blue - state['z_offset']) / 1000
+            u_ia_pos_right[0] = (((X_blue - mtx_rgb[0,2]) * Z_blue - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
+            u_ia_pos_right[1] = (((Y_blue - mtx_rgb[1,2]) * Z_blue - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
+            u_ia_pos_right = u_ia_pos_right.reshape(3, 1)
 
-            u_ia_ori = q
-            u_ia_ori = u_ia_ori.reshape(4, 1)
+            u_ia_ori_right = q_r
+            u_ia_ori_right = u_ia_ori_right.reshape(4, 1)
 
-            # print("u_ia_pos: ", u_ia_pos)
-            visualizer.update_kf(u_ia_ori = u_ia_ori, u_ia_pos = u_ia_pos, gyro = gyro, mag = mag, acc = acc)
-            #print(f"Posicion c/cam: {float(visualizer.x_estimado[0]):.4f} {float(visualizer.x_estimado[1]):.4f} {float(visualizer.x_estimado[2]):.4f}")
-        
-        #print("Velocidad: ", float(visualizer.x_estimado[3]),float(visualizer.x_estimado[4]),float(visualizer.x_estimado[5]))
-        #print("u_ia_ori: ", u_ia_ori)
-        acc_midi = (np.linalg.norm(acc) - 1)
-        midi_note = map_position_to_midi(float(visualizer.x_estimado[0]), float(visualizer.x_estimado[1]), float(visualizer.x_estimado[2]), time.time(), acc_midi)
-        send_midi_note(midi_note, acc_midi)
-        coords[0] = float(visualizer.x_estimado[0])
-        coords[1] = float(visualizer.x_estimado[1])
-        coords[2] = float(visualizer.x_estimado[2])
+            right_kalman.update_kf(u_ia_ori = u_ia_ori_right, u_ia_pos = u_ia_pos_right, gyro = gyro_r, mag = mag_r, acc = acc_r)
+            # print(f"Right Kalman only cam: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
 
+        if right_drum_on or (pal_indic == 5 or pal_indic == 3):
+            acc_midi = (np.linalg.norm(acc_r) - 1)
+            midi_note = map_position_to_midi(float(right_kalman.x_estimado[0].item()), float(right_kalman.x_estimado[1].item()), float(right_kalman.x_estimado[2].item()), time.time(), acc_midi)
+            send_midi_note(midi_note, acc_midi)
+            coords_right[0] = float(right_kalman.x_estimado[0].item())
+            coords_right[1] = float(right_kalman.x_estimado[1].item())
+            coords_right[2] = float(right_kalman.x_estimado[2].item())
+
+
+        if (camera_time > imu_time - 50) and (camera_time < imu_time + 50) and not flag_imu_empty and (pal_indic == 5 or pal_indic == 4):
+            if not flag_cam_empty:
+                if X_green and Y_green and not Z_green:
+                    Z_green = u_ia_pos_left[2] * 1000 + state['z_offset']
+                else:
+                    u_ia_pos_left[2] = (Z_green - state['z_offset']) / 1000
+                u_ia_pos_left[0] = (((X_green - mtx_rgb[0,2]) * Z_green - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
+                u_ia_pos_left[1] = (((Y_green - mtx_rgb[1,2]) * Z_green - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
+                u_ia_pos_left = u_ia_pos_left.reshape(3, 1)
+
+                u_ia_ori_left = q_l
+                u_ia_ori_left = u_ia_ori_left.reshape(4, 1)
+
+                left_kalman.update_kf(u_ia_ori = u_ia_ori_left, u_ia_pos = u_ia_pos_left, gyro = gyro_l, mag = mag_l, acc = acc_l)
+
+            else:    
+                left_kalman.update_kf(u_ia_ori = u_ia_ori_left, u_ia_pos = u_ia_pos_left, gyro = gyro_l, mag = mag_l, acc = acc_l)
+
+        elif not flag_imu_empty and (pal_indic == 5 or pal_indic == 4):
+            left_kalman.update_kf(gyro = gyro_l, mag = mag_l, acc = acc_l)
+
+        elif not flag_cam_empty and left_drum_on:
+            if X_green and Y_green and not Z_green:
+                Z_green = u_ia_pos_left[2] * 1000 + state['z_offset']
+            else:
+                u_ia_pos_left[2] = (Z_green - state['z_offset']) / 1000
+            u_ia_pos_left[0] = (((X_green - mtx_rgb[0,2]) * Z_green - (state['x_offset'] - mtx_rgb[0,2]) * state['z_offset']) / mtx_rgb[0,0]) / 1000
+            u_ia_pos_left[1] = (((Y_green - mtx_rgb[1,2]) * Z_green - (state['y_offset'] - mtx_rgb[1,2]) * state['z_offset']) / mtx_rgb[1,1]) / 1000
+            u_ia_pos_left = u_ia_pos_left.reshape(3, 1)
+
+            u_ia_ori_left = q_l
+            u_ia_ori_left = u_ia_ori_left.reshape(4, 1)
+
+            left_kalman.update_kf(u_ia_ori = u_ia_ori_left, u_ia_pos = u_ia_pos_left, gyro = gyro_l, mag = mag_l, acc = acc_l)
+
+        if left_drum_on or (pal_indic == 5 or pal_indic == 4):
+            # print(f"Left Kalman: {float(left_kalman.x_estimado[0]):.2f},{float(left_kalman.x_estimado[1]):.2f},{float(left_kalman.x_estimado[2]):.2f}")
+            acc_midi = (np.linalg.norm(acc_l) - 1)
+            midi_note = map_position_to_midi(float(left_kalman.x_estimado[0].item()), float(left_kalman.x_estimado[1].item()), float(left_kalman.x_estimado[2].item()), time.time(), acc_midi)
+            send_midi_note(midi_note, acc_midi)
+            coords_left[0] = float(left_kalman.x_estimado[0].item())
+            coords_left[1] = float(left_kalman.x_estimado[1].item())
+            coords_left[2] = float(left_kalman.x_estimado[2].item())
 
         end_time = time.time()
-        time_kalman = end_time - start_time
-        guardar_en_csv("datos.csv", camera_time, imu_time, time_kalman, contador_imu)
-        # print(f"Tiempo de procesamiento kalman: {end_time - start_time:.5f} segundos")
-        time.sleep(0.01)  # 10ms entre muestras
-
+        #print(f"Tiempo de procesamiento hilo kalman: {end_time - start_time:.3f} segundos")
+        time.sleep(0.008)  # 8ms entre muestras
 
 ##########################
 # Lanzamos los hilos
@@ -716,7 +904,9 @@ except KeyboardInterrupt:
     print("Terminando la ejecución...")
     openni2.unload()
     cv2.destroyAllWindows()
-    shm_graf.close()
+    shm_graf_r.close()
+    shm_graf_l.close()
     shm_esp.close()
-    shm_graf.unlink()
+    shm_graf_r.unlink()
+    shm_graf_l.unlink()
     sys.exit()
