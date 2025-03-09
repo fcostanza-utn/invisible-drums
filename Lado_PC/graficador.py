@@ -29,20 +29,32 @@ coords_left = np.ndarray((3,), dtype='d', buffer=shm_left.buf)
 
 # Crear una única figura con dos subplots 3D (lado a lado)
 fig, ax = plt.subplots(2, 2, subplot_kw={'projection': '3d'}, figsize=(12, 6))
+fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.01, hspace=0.01)
 
 ax1 = ax[0, 0]
 ax2 = ax[0, 1]
 ax3 = ax[1, 0]
 ax4 = ax[1, 1]
 
+for a in [ax1, ax3]:
+    a.view_init(elev=0, azim=90)
+    a.legend(loc='upper right', fontsize='small')
+    a.set_proj_type('ortho')    # Proyección ortográfica (opcional)
+    a.grid(False)
+for a in [ax2, ax4]:
+    a.view_init(elev=90, azim=0)
+    a.legend(loc='upper right', fontsize='small')
+    a.set_proj_type('ortho')    # Proyección ortográfica (opcional)
+    a.grid(False)
+    
 # Función para dibujar la geometría estática (tambores, platillos) en un eje dado.
 def plot_instruments(ax):
     # Dibujo de los tambores y Hi-hat.
     radio = 15
     theta = np.linspace(0, 2 * np.pi, 100)
-    despl_x = [-9, -11, 32, -41]        # Snare / High-tom / Low-tom / Hi-hat
-    despl_z = [-11, -52, -12, -9]        # Snare / High-tom / Low-tom / Hi-hat
-    alturas = [50, 17, 50, 30]           # Snare / High-tom / Low-tom / Hi-hat
+    despl_x = [-15, -15, 32, -50]        # Snare / High-tom / Low-tom / Hi-hat
+    despl_z = [-11, -65, -12, -15]        # Snare / High-tom / Low-tom / Hi-hat
+    alturas = [65, 17, 65, 30]           # Snare / High-tom / Low-tom / Hi-hat
     for y, z, x in zip(alturas, despl_z, despl_x):
         x_circ = radio * np.cos(theta) + x
         z_circ = radio * np.sin(theta) + z
@@ -52,9 +64,9 @@ def plot_instruments(ax):
     # Dibujo de los platillos (Crash / Ride).
     radio = 20
     theta = np.linspace(0, 2 * np.pi, 100)
-    despl_x = [-33, 31]         # Crash / Ride
-    despl_z = [-36, -41]        # Crash / Ride
-    alturas = [17, 20]         # Crash / Ride
+    despl_x = [-45, 31]         # Crash / Ride
+    despl_z = [-50, -41]        # Crash / Ride
+    alturas = [-2.5, 15]         # Crash / Ride
     for y, z, x in zip(alturas, despl_z, despl_x):
         x_circ = radio * np.cos(theta) + x
         z_circ = radio * np.sin(theta) + z
@@ -98,6 +110,7 @@ def actualizar(frame):
     x_left = coords_left[0] * 100
     y_left = coords_left[1] * 100
     z_left = coords_left[2] * 100
+
     tiempo_actual = time.time()
     trail_points_right.append((tiempo_actual, (x_right, y_right, z_right)))
     trail_points_left.append((tiempo_actual, (x_left, y_left, z_left)))
@@ -149,7 +162,7 @@ def actualizar(frame):
     return trail_line1, current_point1, trail_line2, current_point2, trail_line3, current_point3, trail_line4, current_point4
 
 # Crear la animación utilizando la figura que contiene ambos subplots.
-ani = FuncAnimation(fig, actualizar, interval=100, blit=False)
+ani = FuncAnimation(fig, actualizar, interval=10, blit=False)
 
 # Agregar leyendas a cada eje.
 ax1.legend()
@@ -157,8 +170,9 @@ ax2.legend()
 ax3.legend()
 ax4.legend()
 
+plt.tight_layout()
 plt.show()
 
-# Al cerrar la ventana, liberamos la conexión a la memoria compartida.
+# # Al cerrar la ventana, liberamos la conexión a la memoria compartida.
 shm_right.close()
 shm_left.close()

@@ -20,9 +20,12 @@ sounds = {
 def play_drum(note, volume):
     print("vol: ", volume)
     if note in sounds:
+        Tiempo_reproduccion = time.time()
         sound = pygame.mixer.Sound(sounds[note])
         sound.set_volume(volume)
         sound.play()
+        Tiempo_reproduccion = (time.time() - Tiempo_reproduccion)*100
+        print(Tiempo_reproduccion)
     else:
         print(f"No sound assigned for note {note}")
 
@@ -36,9 +39,11 @@ with mido.open_input('MIDI1 0') as port:
         for msg in port:
             # Solo procesa mensajes de nota on
             if msg.type == 'note_on' and msg.velocity > 0:
-                print(f"Received note: {msg.note} VELOCITY: {msg.velocity} time: {time.time()}")
+                time_on = time.time()
+                print(f"Received note: {msg.note} VELOCITY: {msg.velocity} time: {time_on}")
                 play_drum(msg.note, float(msg.velocity/100))
             elif msg.type == 'note_off':
-                print(f"Received note off: {msg.note}")
+                time_off = time.time()
+                print(f"Received note off: {msg.note} delta time={(time_off-time_on)*100}")
     except KeyboardInterrupt:
         print("Stopped by user.")

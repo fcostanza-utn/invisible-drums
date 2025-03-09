@@ -79,7 +79,6 @@ class IMUVisualizer:
         data_split = clean_string.split(',')
         try:
             data = [float(value) for value in data_split]
-            #print(len(data))
             if len(data) == (22):
                 return {'acc_1'     :   data[0:3], 
                         'gyro_1'    :   data[3:6], 

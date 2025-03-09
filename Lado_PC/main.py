@@ -7,9 +7,6 @@ import math
 from collections import deque
 import mido
 from kalman_module import IMUVisualizer
-from PyQt5 import QtWidgets
-import pyqtgraph as pg
-import pyqtgraph.opengl as gl
 import sys
 import time
 import torch
@@ -17,7 +14,6 @@ import numpy as np
 from data_sync import DataSynchronizer
 from queue import Queue, Empty
 import threading
-import csv
 from multiprocessing import shared_memory
 from RW_LOCK import RWLock
 
@@ -39,7 +35,8 @@ mid_points = []
 blue_tip_detection = None
 red_tape_detection = None
 
-ref_time_midi = 0
+ref_time_midi_r = 0
+ref_time_midi_l = 0
 
 mtx_rgb = np.array([[549.512901,    0.,             303.203858],
                     [0.,            550.614039,     232.135452],
@@ -113,12 +110,11 @@ except FileNotFoundError:
     exit(1)
 imu_data = np.ndarray((1,), dtype='U160', buffer=shm_esp.buf)
 """
-INICIALIZACION DE YOLO y Midas
+INICIALIZACION DE YOLO y kinect
 """
 # modelo YOLO
-# modelo YOLO
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model_yolo = YOLO("yolo-Weights/best_yolo11m_v4Kinect.pt").to(device)
+model_yolo = YOLO("yolo-Weights/best_yolo11s_v4Kinect.pt").to(device)
 #classNames = ["drumsticks_mid_R", "drumsticks_tip_R", "drumsticks_mid_L", "drumsticks_tip_L"] # Definir las clases de objetos para la detección
 classNames = ['3.', 'drumsticks_mid_L', 'drumsticks_mid_R', 'drumsticks_tip_L', 'drumsticks_tip_R']
 
@@ -164,146 +160,94 @@ FUNCIONES
 """
 # Función para enviar una nota MIDI
 def send_midi_note(note, acc):
-    timeoff = 0.05
+    timeoff = 0.01
     if note:
-        if 0.5 < (acc) <= 1:
+        if 1 < (acc) <= 1.5:
             midi_out.send(mido.Message('note_on', note=note, velocity=15))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 1 < (acc) <= 1.5:
-            midi_out.send(mido.Message('note_on', note=note, velocity=30))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
         elif 1.5 < (acc) <= 2:
-            midi_out.send(mido.Message('note_on', note=note, velocity=45))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+            midi_out.send(mido.Message('note_on', note=note, velocity=30))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
         elif 2 < (acc) <= 2.5:
-            midi_out.send(mido.Message('note_on', note=note, velocity=60))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+            midi_out.send(mido.Message('note_on', note=note, velocity=45))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
         elif 2.5 < (acc) <= 3:
-            midi_out.send(mido.Message('note_on', note=note, velocity=75))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+            midi_out.send(mido.Message('note_on', note=note, velocity=60))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
         elif 3 < (acc) <= 3.5:
+            midi_out.send(mido.Message('note_on', note=note, velocity=75))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
+        elif 3.5 < (acc) <= 4:
             midi_out.send(mido.Message('note_on', note=note, velocity=90))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
-        elif 3.5 < (acc):
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
+        elif 4 < (acc):
             midi_out.send(mido.Message('note_on', note=note, velocity=100))
-            midi_out.send(mido.Message('note_off', note=note, velocity=100, time=timeoff))
+            midi_out.send(mido.Message('note_off', note=note, velocity=100))
 
-def map_position_to_midi(x, y, z, time, acc_midi):
-    global ref_time_midi
+def map_position_to_midi(x, y, z, time_r, time_l, acc_midi):
+    global ref_time_midi_r
+    global ref_time_midi_l
     x = x * 100
     y = y * 100
     z = z * 100
     #print(f"acc midi: {acc_midi:.2f}")
-    if (acc_midi) > 0.25:
-        if time - ref_time_midi > 0.25:
-            if (-24 < x < 6) and (45 < y < 55) and (-26 < z < 4):           # Nota MIDI para un snare drum
-                ref_time_midi = time
+    print("tiempos midi: ", time_r, time_l)
+    if (acc_midi) > 1:
+        if time_l - ref_time_midi_l > 0.3:
+            if (-30 < x < 0) and (57.5 < y < 72.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
+                ref_time_midi_l = time_l
                 return 38  
-            elif (-56 < x < -26) and (25 < y < 35) and (-24 < z < 6):       # Nota MIDI para un hihat drum
-                ref_time_midi = time
+            elif (-65 < x < -35) and (22.5 < y < 37.5) and (-30 < z < 0):       # Nota MIDI para un hihat drum
+                ref_time_midi_l = time_l
                 return 42  
-            elif (-53 < x < -13) and (-2.5 < y < 7.5) and (-56 < z < -16):           # Nota MIDI para un crash drum
-                ref_time_midi = time
+            elif (-65 < x < -25) and (-10 < y < 5) and (-70 < z < -30):           # Nota MIDI para un crash drum
+                ref_time_midi_l = time_l
                 return 49  
-            elif (11 < x < 51) and (15 < y < 25) and (-61 < z < -21):       # Nota MIDI para un ride drum
-                ref_time_midi = time
+            elif (11 < x < 51) and (7.5 < y < 22.5) and (-61 < z < -21):       # Nota MIDI para un ride drum
+                ref_time_midi_l = time_l
                 return 51  
-            elif (-27 < x < 3) and (12.0 < y < 22.0) and (-67 < z < -37):       # Nota MIDI para un hightom drum
-                ref_time_midi = time
+            elif (-30 < x < 0) and (9.5 < y < 24.5) and (-80 < z < -50):       # Nota MIDI para un hightom drum
+                ref_time_midi_l = time_l
                 return 50  
-            elif (17 < x < 47) and (45 < y < 55) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
-                ref_time_midi = time
+            elif (17 < x < 47) and (57.5 < y < 72.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
+                ref_time_midi_l = time_l
+                return 45  
+        if time_r - ref_time_midi_r > 0.3:
+            if (-30 < x < 0) and (57.5 < y < 72.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
+                ref_time_midi_r = time_r
+                return 38  
+            elif (-65 < x < -35) and (22.5 < y < 37.5) and (-30 < z < 0):       # Nota MIDI para un hihat drum
+                ref_time_midi_r = time_r
+                return 42  
+            elif (-65 < x < -25) and (-10 < y < 5) and (-65 < z < -25):           # Nota MIDI para un crash drum
+                ref_time_midi_r = time_r
+                return 49  
+            elif (11 < x < 51) and (7.5 < y < 22.5) and (-61 < z < -21):       # Nota MIDI para un ride drum
+                ref_time_midi_r = time_r
+                return 51  
+            elif (-30 < x < 0) and (9.5 < y < 24.5) and (-80 < z < -50):       # Nota MIDI para un hightom drum
+                ref_time_midi_r = time_r
+                return 50  
+            elif (17 < x < 47) and (57.5 < y < 72.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
+                ref_time_midi_r = time_r
                 return 45  
         return None
     return None
-
-def corregir_mapa_profundidad(depth_frame, T, fx, fy, cx, cy):
-    """
-    Corrige el mapa de profundidad aplicando la transformación T de forma vectorizada.
-    
-    Parámetros:
-      depth_frame: arreglo 2D de profundidad (por ejemplo, 480x640) en unidades (milímetros)
-      T: matriz de transformación 4x4 (numpy.array) que compensa el offset entre proyector y cámara IR.
-      fx, fy: focales en píxeles
-      cx, cy: coordenadas del centro óptico
-      
-    Retorna:
-      nuevo_depth: mapa de profundidad corregido (2D, mismo tamaño que depth_frame)
-    """
-    H, W = depth_frame.shape
-    # Crear rejilla de coordenadas para cada píxel
-    grid_y, grid_x = np.indices((H, W))  # grid_y y grid_x tienen forma (H, W)
-    
-    # Aplanar los arreglos para operar vectorizadamente
-    grid_x = grid_x.flatten()  # forma (N,)
-    grid_y = grid_y.flatten()
-    depth = depth_frame.flatten()  # forma (N,)
-    
-    # Filtrar píxeles con profundidad válida (no cero)
-    valid = depth > 0
-    grid_x = grid_x[valid]
-    grid_y = grid_y[valid]
-    depth = depth[valid]
-    
-    # Convertir coordenadas de imagen (projective) a coordenadas reales 3D
-    X = (grid_x - cx) * depth / fx
-    Y = (grid_y - cy) * depth / fy
-    Z = depth
-    
-    # Formar las coordenadas homogéneas (N, 4)
-    points = np.stack([X, Y, Z, np.ones_like(Z)], axis=1)
-    
-    # Aplicar la transformación T a todos los puntos a la vez
-    points_corr = (T @ points.T).T  # forma (N, 4)
-    
-    # Reproyección a coordenadas de imagen: x' = (X'/Z') * fx + cx, y' = (Y'/Z') * fy + cy
-    X_corr = points_corr[:, 0]
-    Y_corr = points_corr[:, 1]
-    Z_corr = points_corr[:, 2]
-    
-    # Evitar división por cero (Z_corr no debe ser 0 en condiciones normales)
-    new_x = np.round((X_corr / Z_corr) * fx + cx).astype(int)
-    new_y = np.round((Y_corr / Z_corr) * fy + cy).astype(int)
-    
-    # Filtrar los puntos que caen dentro de los límites de la imagen
-    valid_idx = (new_x >= 0) & (new_x < W) & (new_y >= 0) & (new_y < H)
-    new_x = new_x[valid_idx]
-    new_y = new_y[valid_idx]
-    Z_corr = Z_corr[valid_idx]
-    
-    # Crear un mapa de profundidad nuevo, inicializado con infinito para la operación de mínimo
-    new_depth_flat = np.full(H * W, np.inf, dtype=np.float32)
-    # Calcular índices planos de los píxeles reproyectados
-    flat_idx = new_y * W + new_x
-    
-    # Utilizar scatter-min: para cada índice, asignar el menor valor de Z_corr
-    np.minimum.at(new_depth_flat, flat_idx, Z_corr)
-    
-    # Reemplazar los valores que quedaron en inf (sin asignación) por 0
-    new_depth_flat[new_depth_flat == np.inf] = 0.0
-    # Remodelar el arreglo a la forma original de la imagen
-    nuevo_depth = new_depth_flat.reshape(H, W)
-    
-    return nuevo_depth
 
 def aprox_depth_disp(depth_frame, Xp, Yp):
     disparidad = 50
     Xp_min = max(Xp - disparidad, 0)
     Xp_max = min(Xp + disparidad, depth_frame.shape[1])  # Asegurar que no exceda las columnas
 
-    # Yp_min = max(Yp - 10, 0)
-    # Yp_max = min(Yp + 10, depth_frame.shape[0])  # Asegurar que no exceda las columnas
     # Extraer valores dentro de los límites
     z_value = depth_frame[Yp, Xp_min:Xp_max]
     z_value = z_value[z_value != 0]
     X_match = 0
-    Y_match = 0
     z_value_min = 0
 
     if z_value.size > 0:
         # Obtener el valor mínimo y convertirlo a entero
         z_value_min = int(np.min(z_value))
-        #return z_value_min
     else:
         disparidad = 100
         Xp_min = max(Xp - disparidad, 0)
@@ -314,7 +258,6 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
         if z_value.size > 0:
             # Obtener el valor mínimo y convertirlo a entero
             z_value_min = int(np.min(z_value))
-            #return z_value_min
         else:
             disparidad = 125
             Xp_min = max(Xp - disparidad, 0)
@@ -325,20 +268,11 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
             if z_value.size > 0:
                 # Obtener el valor mínimo y convertirlo a entero
                 z_value_min = int(np.min(z_value))
-                #return z_value_min
             print("Z value caso 3: ", z_value_min)
     for x in range(Xp_min, Xp_max):
-        # for y in range(Yp_min, Yp_max):
         if depth_frame[Yp, x] == z_value_min: 
             X_match=x
-                # Y_match=y
     return {'z_value_min': z_value_min, 'xy':(X_match,Yp)}
-
-def guardar_en_csv(nombre_archivo, dato1, dato2, dato3, dato4):
-    with open(nombre_archivo, mode='a', newline='') as archivo:
-        escritor = csv.writer(archivo)
-        escritor.writerow([dato1, dato2, dato3, dato4])
-    # print(f"Datos guardados en {nombre_archivo}")
 
 def quaternion_from_matrix(M):
     """
@@ -416,24 +350,6 @@ def look_at(forward, up=np.array([0, 0, 1])):
     q = quaternion_from_matrix(M)
     return q
 
-def centim_a_pixel(X, Y, Z, mtx):
-    x_mm = X * 10                   # Se contempla que X se pasó en centimetros
-    y_mm = Y * 10                   # Se contempla que Y se pasó en centimetros
-    z_mm = Z * 10                   # Se contempla que Z se pasó en centimetros
-    fx = mtx[0,0]
-    fy = mtx[1,1]
-    cx = mtx[0,1]
-    cy = mtx[1,2]
-    state = data_sync.get_state()
-    x_offset = state['x_offset']    # Se contempla que se encuentra guardado en pixeles
-    y_offset = state['y_offset']    # Se contempla que se encuentra guardado en pixeles
-    z_offset = state['z_offset']    # Se contempla que se encuentra guardado en milimetros
-
-    X_px = (((x_mm * fx) + (z_offset * (x_offset - cx)))/(z_offset + z_mm)) + cx
-    Y_px = (((y_mm * fy) + (z_offset * (y_offset - cy)))/(z_offset + z_mm)) + cy
-
-    return X_px, Y_px
-
 ##########################
 # 1. Hilo de captura (sensor)
 ##########################
@@ -479,7 +395,6 @@ def sensor_capture_thread():
         time.sleep(0.005)  # 5ms entre muestras
     #print("Terminando hilo de muestreo...")
 
-    
 ##########################
 # 2. Hilo de procesamiento de imagen
 ##########################
@@ -494,9 +409,7 @@ def image_processing_thread():
         depth_buff = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
         mask = (depth_buff == 0).astype(np.uint8) * 255
         depth_corregido = cv2.inpaint(depth_buff, mask, 5, cv2.INPAINT_TELEA)
-        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        # depth_corregido = cv2.morphologyEx(depth_buff, cv2.MORPH_CLOSE, kernel)
-        depth_corregido = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
+        #depth_corregido = np.array(depth_frame.get_buffer_as_uint16()).reshape((depth_frame.height, depth_frame.width))
 
         X_blue = 0
         Y_blue = 0
@@ -508,6 +421,8 @@ def image_processing_thread():
         if color_data is not None:
             elapsed_time = time.time()
             results = model_yolo.predict(color_data, conf=0.20, stream=True)
+            end_time = time.time()
+            print(f"Tiempo de procesamiento yolo: {end_time - start_time:.3f} segundos")
             points = {}
 
             for r in results:
@@ -521,11 +436,7 @@ def image_processing_thread():
                     Xp, Yp = (x1 + x2) // 2, (y1 + y2) // 2
                     z_value_dict = aprox_depth_disp(depth_corregido, Xp, Yp)
                     z_value = z_value_dict.get('z_value_min')
-                    X_Z     = z_value_dict.get('xy')[0]
-                    Y_Z     = z_value_dict.get('xy')[1]
-                    
 
-                    confidence = math.ceil((box.conf[0] * 100)) / 100
                     cls = int(box.cls[0])
                     class_name = classNames[cls]
 
@@ -546,9 +457,6 @@ def image_processing_thread():
                         cv2.putText(color_data, f"z_value:({z_value})",
                                     (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 0, 0), 2)
                         points[class_name] = (Xp, Yp, z_value)
-                        # cv2.putText(depth_corregido, f"delta px X:({Xp-X_Z}) Y: ({Yp-Y_Z})",
-                        #             (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-                        # cv2.line(depth_corregido, (Xp, Yp), (X_Z, Y_Z), (0, 255, 0), 2)
 
             if right_tip_detected:
                 (X_blue, Y_blue, Z_blue) = points["drumsticks_tip_R"]
@@ -603,8 +511,6 @@ def image_processing_thread():
         if cv2.waitKey(1) == ord('q'):
             stop_event.set()  # Señalizamos al hilo 1 que debe detenerse
             break
-        end_time = time.time()
-        #print(f"Tiempo de procesamiento hilo imagen: {end_time - start_time:.3f} segundos")
         
     shm_graf_r.close()
     shm_graf_r.unlink()  
@@ -643,6 +549,9 @@ def kalman_update_thread():
     only_green = False
     time_only_blue = 0
     time_only_green = 0
+
+    time_note_r = 0
+    time_note_l = 0
     
     right_drum_on = True
     left_drum_on = True
@@ -802,14 +711,12 @@ def kalman_update_thread():
             else:    
                 right_kalman.update_kf(u_ia_ori = u_ia_ori_right, u_ia_pos = u_ia_pos_right, gyro = gyro_r, mag = mag_r, acc = acc_r)
             print(f"Right Kalman both: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
+            print("Imu time: ", imu_time)
 
         elif not flag_imu_empty and (pal_indic == 5 or pal_indic == 3):
             right_kalman.update_kf(gyro = gyro_r, mag = mag_r, acc = acc_r)
-            # print(f"Right Kalman only imu: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
-            # print("Imu time: ", imu_time)
-            # print("Camera_time : ", camera_time)
-            # print("milisegundos imu : ", milisegundos)
-            print("offset_time_imu : ", data_sync.get_state()['offset_time_imu'])
+            print("Imu time: ", imu_time)
+            print("Camera_time : ", camera_time)
                     
         elif not flag_cam_empty and right_drum_on:
             if X_blue and Y_blue and not Z_blue:
@@ -824,11 +731,11 @@ def kalman_update_thread():
             u_ia_ori_right = u_ia_ori_right.reshape(4, 1)
 
             right_kalman.update_kf(u_ia_ori = u_ia_ori_right, u_ia_pos = u_ia_pos_right, gyro = gyro_r, mag = mag_r, acc = acc_r)
-            # print(f"Right Kalman only cam: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
 
         if right_drum_on or (pal_indic == 5 or pal_indic == 3):
             acc_midi = (np.linalg.norm(acc_r) - 1)
-            midi_note = map_position_to_midi(float(right_kalman.x_estimado[0].item()), float(right_kalman.x_estimado[1].item()), float(right_kalman.x_estimado[2].item()), time.time(), acc_midi)
+            time_note_r = time.time()
+            midi_note = map_position_to_midi(float(right_kalman.x_estimado[0].item()), float(right_kalman.x_estimado[1].item()), float(right_kalman.x_estimado[2].item()), time_note_r, -1, acc_midi)
             send_midi_note(midi_note, acc_midi)
             coords_right[0] = float(right_kalman.x_estimado[0].item())
             coords_right[1] = float(right_kalman.x_estimado[1].item())
@@ -871,9 +778,9 @@ def kalman_update_thread():
             left_kalman.update_kf(u_ia_ori = u_ia_ori_left, u_ia_pos = u_ia_pos_left, gyro = gyro_l, mag = mag_l, acc = acc_l)
 
         if left_drum_on or (pal_indic == 5 or pal_indic == 4):
-            # print(f"Left Kalman: {float(left_kalman.x_estimado[0]):.2f},{float(left_kalman.x_estimado[1]):.2f},{float(left_kalman.x_estimado[2]):.2f}")
             acc_midi = (np.linalg.norm(acc_l) - 1)
-            midi_note = map_position_to_midi(float(left_kalman.x_estimado[0].item()), float(left_kalman.x_estimado[1].item()), float(left_kalman.x_estimado[2].item()), time.time(), acc_midi)
+            time_note_l = time.time()
+            midi_note = map_position_to_midi(float(left_kalman.x_estimado[0].item()), float(left_kalman.x_estimado[1].item()), float(left_kalman.x_estimado[2].item()), -1, time_note_l, acc_midi)
             send_midi_note(midi_note, acc_midi)
             coords_left[0] = float(left_kalman.x_estimado[0].item())
             coords_left[1] = float(left_kalman.x_estimado[1].item())
@@ -881,7 +788,7 @@ def kalman_update_thread():
 
         end_time = time.time()
         #print(f"Tiempo de procesamiento hilo kalman: {end_time - start_time:.3f} segundos")
-        time.sleep(0.008)  # 8ms entre muestras
+        time.sleep(0.006)  # 8ms entre muestras
 
 ##########################
 # Lanzamos los hilos
@@ -898,7 +805,6 @@ t3.start()
 # Mantenemos el hilo principal vivo (por ejemplo, con un bucle infinito o esperando a que terminen los hilos)
 try:
     while not stop_event.is_set():
-        # sys.exit(app.exec_())
         time.sleep(1)
 except KeyboardInterrupt:
     print("Terminando la ejecución...")

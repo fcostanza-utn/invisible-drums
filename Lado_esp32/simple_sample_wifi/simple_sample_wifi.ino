@@ -226,7 +226,7 @@ void loop() {
     WiFiClient client = server.available();  // Acepta nuevas conexiones    
     // Mantener la conexión abierta
     while (client.connected()) {
-      if ((millis() - timer) > 15) {
+      if ((millis() - timer) > 4) {
 
         mpu.update();
         compass.read();
@@ -372,7 +372,11 @@ void loop() {
         sensorDataRemoto.gz = mpu.getGyroZ();
     
         sensorDataRemoto.tiempo = millis() - ref_time;
-        sensorDataRemoto.boton = digitalRead(PIN_GPIO);  // Leer el estado del pin
+        int estado = digitalRead(PIN_GPIO);  // Leer el estado del pin
+        sensorDataRemoto.boton = estado;  // Leer el estado del pin
+        if(estado == 0){
+          mpu.calcOffsets(true, true);
+        }
 
         esp_err_t resultado = esp_now_send(mac, (uint8_t *) &sensorDataRemoto, sizeof(sensorDataRemoto));
         if (resultado == ESP_OK) {
