@@ -54,12 +54,12 @@ def plot_instruments(ax):
     theta = np.linspace(0, 2 * np.pi, 100)
     despl_x = [-15, -15, 32, -50]        # Snare / High-tom / Low-tom / Hi-hat
     despl_z = [-11, -65, -12, -15]        # Snare / High-tom / Low-tom / Hi-hat
-    alturas = [65, 17, 65, 30]           # Snare / High-tom / Low-tom / Hi-hat
+    alturas = [60, 17, 60, 30]           # Snare / High-tom / Low-tom / Hi-hat
     for y, z, x in zip(alturas, despl_z, despl_x):
         x_circ = radio * np.cos(theta) + x
         z_circ = radio * np.sin(theta) + z
         # Usamos np.full_like para crear un vector con la altura constante
-        ax.plot(x_circ, np.full_like(x_circ, y), z_circ, color='cyan', linestyle='--', alpha=0.7)
+        ax.plot(x_circ, np.full_like(x_circ, y), z_circ, color='black', linestyle='--', alpha=0.7)
     
     # Dibujo de los platillos (Crash / Ride).
     radio = 20
@@ -70,7 +70,7 @@ def plot_instruments(ax):
     for y, z, x in zip(alturas, despl_z, despl_x):
         x_circ = radio * np.cos(theta) + x
         z_circ = radio * np.sin(theta) + z
-        ax.plot(x_circ, np.full_like(x_circ, y), z_circ, color='cyan', linestyle='--', alpha=0.7)
+        ax.plot(x_circ, np.full_like(x_circ, y), z_circ, color='black', linestyle='--', alpha=0.7)
     
     # Configuración de los límites y etiquetas.
     ax.set_xlim(-80, 80)

@@ -37,6 +37,8 @@ red_tape_detection = None
 
 ref_time_midi_r = 0
 ref_time_midi_l = 0
+SentidoY_blue_tip = 1   #Si es positivo el golpe es desendente, caso contrario es ascendente
+SentidoY_green_tip = 1
 
 mtx_rgb = np.array([[549.512901,    0.,             303.203858],
                     [0.,            550.614039,     232.135452],
@@ -187,14 +189,17 @@ def send_midi_note(note, acc):
 def map_position_to_midi(x, y, z, time_r, time_l, acc_midi):
     global ref_time_midi_r
     global ref_time_midi_l
+    global SentidoY_blue_tip
+    global SentidoY_green_tip
     x = x * 100
     y = y * 100
     z = z * 100
     #print(f"acc midi: {acc_midi:.2f}")
-    print("tiempos midi: ", time_r, time_l)
+    #print("tiempos midi: ", time_r, time_l)
     if (acc_midi) > 1:
-        if time_l - ref_time_midi_l > 0.3:
-            if (-30 < x < 0) and (57.5 < y < 72.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
+        #if time_l - ref_time_midi_l > 0.3:
+        if (time_l - ref_time_midi_l) > 0.25:
+            if (-30 < x < 0) and (52.5 < y < 67.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
                 ref_time_midi_l = time_l
                 return 38  
             elif (-65 < x < -35) and (22.5 < y < 37.5) and (-30 < z < 0):       # Nota MIDI para un hihat drum
@@ -209,11 +214,12 @@ def map_position_to_midi(x, y, z, time_r, time_l, acc_midi):
             elif (-30 < x < 0) and (9.5 < y < 24.5) and (-80 < z < -50):       # Nota MIDI para un hightom drum
                 ref_time_midi_l = time_l
                 return 50  
-            elif (17 < x < 47) and (57.5 < y < 72.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
+            elif (17 < x < 47) and (52.5 < y < 67.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
                 ref_time_midi_l = time_l
                 return 45  
-        if time_r - ref_time_midi_r > 0.3:
-            if (-30 < x < 0) and (57.5 < y < 72.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
+        #if time_r - ref_time_midi_r > 0.3:
+        if (time_r - ref_time_midi_r) > 0.25:
+            if (-30 < x < 0) and (52.5 < y < 67.5) and (-26 < z < 4):           # Nota MIDI para un snare drum
                 ref_time_midi_r = time_r
                 return 38  
             elif (-65 < x < -35) and (22.5 < y < 37.5) and (-30 < z < 0):       # Nota MIDI para un hihat drum
@@ -228,7 +234,7 @@ def map_position_to_midi(x, y, z, time_r, time_l, acc_midi):
             elif (-30 < x < 0) and (9.5 < y < 24.5) and (-80 < z < -50):       # Nota MIDI para un hightom drum
                 ref_time_midi_r = time_r
                 return 50  
-            elif (17 < x < 47) and (57.5 < y < 72.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
+            elif (17 < x < 47) and (52.5 < y < 67.5) and (-27 < z < 3):        # Nota MIDI para un lowtom drum
                 ref_time_midi_r = time_r
                 return 45  
         return None
@@ -268,7 +274,7 @@ def aprox_depth_disp(depth_frame, Xp, Yp):
             if z_value.size > 0:
                 # Obtener el valor mínimo y convertirlo a entero
                 z_value_min = int(np.min(z_value))
-            print("Z value caso 3: ", z_value_min)
+            #print("Z value caso 3: ", z_value_min)
     for x in range(Xp_min, Xp_max):
         if depth_frame[Yp, x] == z_value_min: 
             X_match=x
@@ -399,6 +405,14 @@ def sensor_capture_thread():
 # 2. Hilo de procesamiento de imagen
 ##########################
 def image_processing_thread():
+    global SentidoY_blue_tip
+    global SentidoY_green_tip
+    Contador_deteccion_blue_tip = 0
+    Contador_deteccion_green_tip = 0
+    Yp_blue_anterior = 0
+    Yp_green_anterior = 0
+    frames_a_contar = 2
+
     while not stop_event.is_set():
         start_time = time.time()
         color_frame = color_stream.read_frame()
@@ -422,7 +436,7 @@ def image_processing_thread():
             elapsed_time = time.time()
             results = model_yolo.predict(color_data, conf=0.20, stream=True)
             end_time = time.time()
-            print(f"Tiempo de procesamiento yolo: {end_time - start_time:.3f} segundos")
+            #print(f"Tiempo de procesamiento yolo: {end_time - start_time:.3f} segundos")
             points = {}
 
             for r in results:
@@ -460,10 +474,22 @@ def image_processing_thread():
 
             if right_tip_detected:
                 (X_blue, Y_blue, Z_blue) = points["drumsticks_tip_R"]
+                Contador_deteccion_blue_tip+=1
+                if (frames_a_contar==Contador_deteccion_blue_tip):
+                    Contador_deteccion_blue_tip=0
+                    SentidoY_blue_tip = Y_blue - Yp_blue_anterior
+                else:
+                    Yp_blue_anterior = Y_blue
             if right_mid_detected:
                 (X_red, Y_red, Z_red) = points["drumsticks_mid_R"]
             if left_tip_detected:
                 (X_green, Y_green, Z_green) = points["drumsticks_tip_L"]
+                Contador_deteccion_green_tip+=1
+                if (frames_a_contar==Contador_deteccion_green_tip):
+                    Contador_deteccion_green_tip=0
+                    SentidoY_green_tip = Y_green - Yp_green_anterior
+                else:
+                    Yp_green_anterior = Y_green
             if left_mid_detected:
                 (X_yellow, Y_yellow, Z_yellow) = points["drumsticks_mid_L"]       
 
@@ -710,13 +736,13 @@ def kalman_update_thread():
 
             else:    
                 right_kalman.update_kf(u_ia_ori = u_ia_ori_right, u_ia_pos = u_ia_pos_right, gyro = gyro_r, mag = mag_r, acc = acc_r)
-            print(f"Right Kalman both: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
-            print("Imu time: ", imu_time)
+            #print(f"Right Kalman both: {float(right_kalman.x_estimado[0]):.2f},{float(right_kalman.x_estimado[1]):.2f},{float(right_kalman.x_estimado[2]):.2f}")
+            #print("Imu time: ", imu_time)
 
         elif not flag_imu_empty and (pal_indic == 5 or pal_indic == 3):
             right_kalman.update_kf(gyro = gyro_r, mag = mag_r, acc = acc_r)
-            print("Imu time: ", imu_time)
-            print("Camera_time : ", camera_time)
+            #print("Imu time: ", imu_time)
+            #print("Camera_time : ", camera_time)
                     
         elif not flag_cam_empty and right_drum_on:
             if X_blue and Y_blue and not Z_blue:

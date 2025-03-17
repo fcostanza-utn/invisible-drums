@@ -7,11 +7,9 @@
 
 #define PIN_GPIO 23  // Definir el pin que queremos leer
 
-// Configuración de WiFi
-// const char* ssid = "TomNet";            // Reemplaza con el nombre de tu red WiFi
-// const char* password = "nonealone681";  // Reemplaza con la contraseña de tu red
-// const char* ssid = "ANANOMUERDE 2.4GHz";
-// const char* password = "Dulcinea01";
+//const char* ssid = "Galaxy S23+ FC8A";
+//const char* password = "dubiduba";
+
 const char* ssid = "Personal-Fran-2.4G";
 const char* password = "Fran270894$";
 
@@ -234,7 +232,7 @@ void loop() {
         corrected_y = (compass.m.y - offset_y) * scale_y;
         corrected_z = (compass.m.z - offset_z) * scale_z;
 
-        float sensorData[6] = { mpu.getAccX(), mpu.getAccY(), mpu.getAccZ(), mpu.getGyroX(), mpu.getGyroY(), mpu.getGyroZ() };
+        float sensorData[6] = { mpu.getAccX(), mpu.getAccY(), mpu.getAccZ(), mpu.getGyroX(), mpu.getGyroY(), mpu.getGyroZ() }; 
         for (int i = 0; i < 6; i++) {
           buffer[sampleIndex++] = sensorData[i];
         }
@@ -308,13 +306,13 @@ void loop() {
             report += ",";
             report += String(sensorDataRemoto.boton);
             report += ",";
-            report += String("2");
+            report += String("1");
           }
           flagDatosRemotos = false;
         }
         else {
           report += ",";
-          report += String("4");
+          report += String("3");
         }
         int estado = digitalRead(PIN_GPIO);  // Leer el estado del pin
         if(estado == 0){
