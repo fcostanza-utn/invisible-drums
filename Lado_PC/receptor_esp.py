@@ -11,7 +11,7 @@ INICIALIZACION DE IMU
 rwlock = RWLock()
 
 #esp32_ip = '192.168.60.232'
-esp32_ip = '192.168.1.70'
+esp32_ip = '192.168.1.71'
 esp32_port = 80
 
 """

@@ -16,6 +16,8 @@ from queue import Queue, Empty
 import threading
 from multiprocessing import shared_memory
 from RW_LOCK import RWLock
+import keyboard
+import csv
 
 """
 Variables de datos y control
@@ -360,6 +362,9 @@ def look_at(forward, up=np.array([0, 0, 1])):
 # 1. Hilo de captura (sensor)
 ##########################
 def sensor_capture_thread():
+    with open('Sensor_Tread_time.csv', mode='w', newline='') as archivo:
+        escritor = csv.writer(archivo, delimiter=';')
+        escritor.writerow(['Tiempo de procesamiento hilo sensor en ms'])
     while not stop_event.is_set():
         start_time = time.time()
         rwlock.acquire_read()
@@ -396,7 +401,10 @@ def sensor_capture_thread():
                     pass
         finally:
             rwlock.release_read()
+        
         end_time = time.time()
+        with open('Sensor_Tread_time.csv', mode='a', newline='') as archivo:
+            csv.writer(archivo, delimiter=';').writerow([(end_time - start_time)*1000])
         #print(f"Tiempo de procesamiento hilo muestreo: {end_time - start_time:.3f} segundos")
         time.sleep(0.005)  # 5ms entre muestras
     #print("Terminando hilo de muestreo...")
@@ -412,6 +420,11 @@ def image_processing_thread():
     Yp_blue_anterior = 0
     Yp_green_anterior = 0
     frames_a_contar = 2
+
+    escritor = False
+    with open('Image_Tread_time.csv', mode='w', newline='') as archivo:
+        escritor = csv.writer(archivo, delimiter=';')
+        escritor.writerow(['Tiempo de procesamiento hilo YOLO en ms'])
 
     while not stop_event.is_set():
         start_time = time.time()
@@ -435,7 +448,7 @@ def image_processing_thread():
         if color_data is not None:
             elapsed_time = time.time()
             results = model_yolo.predict(color_data, conf=0.20, stream=True)
-            end_time = time.time()
+            
             #print(f"Tiempo de procesamiento yolo: {end_time - start_time:.3f} segundos")
             points = {}
 
@@ -533,6 +546,9 @@ def image_processing_thread():
             
             cv2.imshow("Cam", color_data)
             cv2.imshow("Depth", depth_corregido)
+            end_time = time.time()
+            with open('Image_Tread_time.csv', mode='a', newline='') as archivo:
+                csv.writer(archivo, delimiter=';').writerow([(end_time - start_time)*1000])
 
         if cv2.waitKey(1) == ord('q'):
             stop_event.set()  # Señalizamos al hilo 1 que debe detenerse
@@ -592,6 +608,15 @@ def kalman_update_thread():
 
     q_r = np.zeros((4, 1))
     q_l = np.zeros((4, 1))
+
+    time_total = 0
+    datos = []
+    start_recording = False
+    escritor = False
+
+    with open('Kalman_Tread_time.csv', mode='w', newline='') as archivo:
+        escritor = csv.writer(archivo, delimiter=';')
+        escritor.writerow(['Tiempo de procesamiento hilo Kalman en ms'])
 
     while not stop_event.is_set():
         start_time = time.time()
@@ -703,19 +728,19 @@ def kalman_update_thread():
                 Z_green_buff = Z_green
                 Z_yellow_buff = Z_yellow
 
-    ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
-        if not flag_cam_empty and not only_blue:
-            vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_blue - Z_red])
-            u = np.array([0,0,1 ])
+    # ################################################# CALCULO DE ORIENTACIÓN MEDIANTE CÁMARA
+    #     if not flag_cam_empty and not only_blue:
+    #         vector_ori = np.array([X_blue - X_red, Y_blue - Y_red, Z_blue - Z_red])
+    #         u = np.array([0,0,1 ])
             
-            q_r = look_at(vector_ori,u)
-            q_r = q_r/np.linalg.norm(q_r)
-        if not flag_cam_empty and not only_green:
-            vector_ori = np.array([X_green - X_yellow, Y_green - Y_yellow, Z_green - Z_yellow])
-            u = np.array([0,0,1 ])
+    #         q_r = look_at(vector_ori,u)
+    #         q_r = q_r/np.linalg.norm(q_r)
+    #     if not flag_cam_empty and not only_green:
+    #         vector_ori = np.array([X_green - X_yellow, Y_green - Y_yellow, Z_green - Z_yellow])
+    #         u = np.array([0,0,1 ])
             
-            q_l = look_at(vector_ori,u)
-            q_l = q_l/np.linalg.norm(q_l)
+    #         q_l = look_at(vector_ori,u)
+    #         q_l = q_l/np.linalg.norm(q_l)
     ################################################# ACTUALIZAR FILTROS DE KALMAN     
         state = data_sync.get_state()
         
@@ -812,7 +837,22 @@ def kalman_update_thread():
             coords_left[1] = float(left_kalman.x_estimado[1].item())
             coords_left[2] = float(left_kalman.x_estimado[2].item())
 
+        if keyboard.is_pressed('a'):
+            print("Key init...")
+            start_recording = True
+
+        if keyboard.is_pressed('e'):
+            print("Key stop...")
+            start_recording = False
+
+        if start_recording:
+            datos.append((time_total, float(u_ia_pos_right[0].item()), float(u_ia_pos_right[1].item()), float(u_ia_pos_right[2].item())))
+            right_kalman.guardar_cuaternion_csv("posicion_onlycam.csv", datos)
+
         end_time = time.time()
+        time_total += end_time - start_time
+        with open('Kalman_Tread_time.csv', mode='a', newline='') as archivo:
+            csv.writer(archivo, delimiter=';').writerow([(end_time - start_time)*1000])
         #print(f"Tiempo de procesamiento hilo kalman: {end_time - start_time:.3f} segundos")
         time.sleep(0.006)  # 8ms entre muestras
 

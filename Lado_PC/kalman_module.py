@@ -1,5 +1,7 @@
 import numpy as np
 from ahrs.filters import EKF
+import csv
+import time
 
 class IMUVisualizer:
 
@@ -216,6 +218,11 @@ class IMUVisualizer:
         acc_corr = acc - gravity_corr
         return acc_corr
 
+    def guardar_cuaternion_csv(self, nombre_archivo, datos_cuaternion):
+        with open(nombre_archivo, mode='w', newline='') as archivo:
+            escritor = csv.writer(archivo, delimiter=';')
+            escritor.writerow(["timestamp", "X", "Y", "Z"])
+            escritor.writerows(datos_cuaternion)
 
     def update_kf(self, u_ia_ori = [0,0,0,0], u_ia_pos = [0,0,0], gyro = [0,0,0], mag = [0,0,0], acc = [0,0,0]):
         self.u_ia_ori = u_ia_ori
@@ -229,4 +236,4 @@ class IMUVisualizer:
         if not (np.all(self.u_ia_ori == 0)):
             self.ori_fus_kf()
     ################################################################## Kalman de Posición Sensor y Fusión
-        self.x_estimado = self.posicion_fus_kf()                                            
+        self.x_estimado = self.posicion_fus_kf()                                          

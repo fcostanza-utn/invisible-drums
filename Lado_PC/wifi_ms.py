@@ -9,6 +9,8 @@ import time
 import math
 from collections import deque
 import ahrs
+import keyboard
+import csv
 
 CANT_SAMPLES = 1
 BAUD_RATE = 115200
@@ -162,13 +164,33 @@ def compensate_magnetometer(orientation, mag_measurement, d):
     return mag_corrected
 
 # Función para interpretar los datos recibidos por WiFi
-def parse_sensor_data(data_string, ref):
+def parse_sensor_data(data_string):
     clean_string = data_string.strip()
     data_split = clean_string.split(',')
     try:
         data = [float(value) for value in data_split]
-        if len(data) == (9 * CANT_SAMPLES + 1):
-            return data[ref:ref+3], data[ref+3:ref+6], data[ref+6:ref+9], data[ref+9]  # Acelerómetro, Giroscopio, Magnetómetro, Tiempo en ms
+        if len(data) == (22):
+            return {'acc_1'     :   data[0:3], 
+                    'gyro_1'    :   data[3:6], 
+                    'mag_1'     :   data[6:9], 
+                    'acc_2'     :   data[9:12], 
+                    'gyro_2'    :   data[12:15], 
+                    'mag_2'     :   data[15:18], 
+                    'boton_2'   :   data[18],
+                    'pal_indic' :   data[19],
+                    'timestamp' :   data[20], 
+                    'boton_1'   :   data[21]}
+        elif len(data) == (12):
+            return {'acc_1'     :   data[0:3], 
+                    'gyro_1'    :   data[3:6], 
+                    'mag_1'     :   data[6:9], 
+                    'acc_2'     :   None, 
+                    'gyro_2'    :   None, 
+                    'mag_2'     :   None, 
+                    'boton_2'   :   1,
+                    'pal_indic' :   data[9],
+                    'timestamp' :   data[10], 
+                    'boton_1'   :   data[11]}
         else:
             return None
     except:
@@ -277,8 +299,20 @@ def H_matrix(q, acc):
     acc_rot = acc_rot * np.linalg.norm(acc)
     return acc_rot
 
+
+def guardar_cuaternion_csv(nombre_archivo, datos_cuaternion):
+    """
+    Guarda los datos de un cuaternión en un archivo CSV con separación por ';'.
+    :param nombre_archivo: Nombre del archivo CSV.
+    :param datos_cuaternion: Lista de tuplas (timestamp, w, x, y, z).
+    """
+    with open(nombre_archivo, mode='w', newline='') as archivo:
+        escritor = csv.writer(archivo, delimiter=';')
+        escritor.writerow(["timestamp", "w", "x", "y", "z"])
+        escritor.writerows(datos_cuaternion)
+
 # Dirección IP y puerto del ESP32
-esp32_ip = '192.168.1.71'  # Reemplázalo con la IP de tu ESP32
+esp32_ip = '192.168.1.70'  # Reemplázalo con la IP de tu ESP32
 esp32_port = 80             # El mismo puerto que configuraste en el ESP32
 
 # Crear un socket TCP/IP
@@ -391,23 +425,30 @@ end_time = 0
 client_socket.connect((esp32_ip, esp32_port))
 print(f"Conectado al ESP32 en {esp32_ip}:{esp32_port}")
 
+datos = []
+start_recording = False
+time_total = 0.0
 
 # Función de actualización para la animación
 def update():
-    global acc, gyro, mag, Q, Q_buff, end_time, start_time, F, x, B, P, H, R, Q_efk, milisegundos
+    global acc, gyro, mag, Q, Q_buff, end_time, start_time, F, x, B, P, H, R, Q_efk, milisegundos, start_recording, datos
 
-    # start_time = time.time()
+    start_time = time.time()
     # wait_time = start_time - end_time
     # print(f"Tiempo de espera entre update's: {wait_time:.4f} segundos")
 
     raw_data = receive_until_newline(client_socket)  # Recibe hasta 1024 bytes
     if not raw_data:
         return
-
-    sensor_data = parse_sensor_data(raw_data.decode(), 0)
+    
+    sensor_data = parse_sensor_data(raw_data.decode())
+    print(sensor_data)
 
     if sensor_data is not None:
-        acc, gyro, mag, milisegundos = sensor_data
+        acc = sensor_data['acc_1']
+        gyro = sensor_data['gyro_1']
+        mag = sensor_data['mag_1']
+        print(f"Acc: {acc}, Gyro: {gyro}, Mag: {mag}")
 
 ############################################################ Rotación para palillo
 
@@ -531,11 +572,22 @@ def update():
         # Imprimir resultados
         update_point(x_estimado[0], x_estimado[1], x_estimado[2])
 
+        if keyboard.is_pressed('a'):
+            print("Key init...")
+            start_recording = True
+
+        if keyboard.is_pressed('e'):
+            print("Key stop...")
+            start_recording = False
+
+        if start_recording:
+            datos.append((sensor_data['timestamp'], Q[0], Q[1], Q[2], Q[3]))
+            guardar_cuaternion_csv("cuaterniones.csv", datos)
 
 # Temporizador para actualizar la gráfica en tiempo real
 timer = pg.QtCore.QTimer()
 timer.timeout.connect(update)
-timer.start(17)  # Actualiza cada 2.5 ms 
+timer.start(5)  # Actualiza cada 2.5 ms 
 
 
 # Iniciar la aplicación de PyQt

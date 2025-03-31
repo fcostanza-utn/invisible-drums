@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import time
 from multiprocessing import shared_memory
+import keyboard
 
 # Nombre que se usará para identificar la memoria compartida del graficador.
 SHM_NAME_GRAF_RIGHT = 'coords_shared_right'
@@ -116,9 +117,11 @@ def actualizar(frame):
     trail_points_left.append((tiempo_actual, (x_left, y_left, z_left)))
     
     # Eliminamos los puntos con más de 2 segundos de antigüedad.
-    while trail_points_right and (tiempo_actual - trail_points_right[0][0] > 1):
+    if keyboard.is_pressed('n'):
+        trail_points_right.clear()
+    while trail_points_right and (tiempo_actual - trail_points_right[0][0] > 15):
         trail_points_right.pop(0)
-    while trail_points_left and (tiempo_actual - trail_points_left[0][0] > 1):
+    while trail_points_left and (tiempo_actual - trail_points_left[0][0] > 15):
         trail_points_left.pop(0)
     
     # Actualizar la trayectoria si hay puntos.

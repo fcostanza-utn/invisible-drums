@@ -6,5 +6,5 @@ timeout /t 5 /nobreak
 start "" py main.py
 timeout /t 5 /nobreak
 
-start "" py graficador.py
+py graficador.py
 pause
